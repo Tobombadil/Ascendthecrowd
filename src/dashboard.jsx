@@ -66,11 +66,10 @@ const DAYS=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 
 // ── Presets ────────────────────────────────────────────────────
 const ACC_PRESETS={
-  "Naive":          {sup:0,  dem:0,  crd:0},
-  "Weather Only":   {sup:60, dem:40, crd:0},
-  "Good Forecaster":{sup:80, dem:70, crd:0},
-  "Ascend":         {sup:85, dem:75, crd:70},
-  "Perfect":        {sup:100,dem:100,crd:100},
+  "Naive":   {sup:0,  dem:0,  crd:0},
+  "Good Forecast":{sup:75, dem:60, crd:30},
+  "Ascend":  {sup:85, dem:75, crd:70},
+  "Perfect": {sup:100,dem:100,crd:100},
 };
 const BATT_PRESETS={
   "2hr Peaker":   {mw:40, mwh:80,  chgMW:40,disMW:40,rte:87,minSoc:10,maxSoc:95},
@@ -217,8 +216,8 @@ function NumField({label,value,setValue,min,max,step,unit,color}){
     else setTxt(String(value));
   },[txt,min,max,setValue,value]);
   return(
-    <div style={{display:"flex",alignItems:"center",gap:4,height:24}}>
-      <span style={{fontSize:8,color:"#5a7a9a",fontWeight:600,width:72,flexShrink:0}}>{label}</span>
+    <div style={{display:"flex",alignItems:"center",gap:4,height:28}}>
+      <span style={{fontSize:10,color:"#5a7a9a",fontWeight:600,width:72,flexShrink:0}}>{label}</span>
       <input type="text" inputMode="decimal" value={txt}
         onChange={e=>setTxt(e.target.value)}
         onBlur={commit}
@@ -227,25 +226,31 @@ function NumField({label,value,setValue,min,max,step,unit,color}){
           if(e.key==="ArrowUp"){e.preventDefault();const nv=Math.min(max,value+(step||1));setValue(nv);setTxt(String(nv));}
           if(e.key==="ArrowDown"){e.preventDefault();const nv=Math.max(min,value-(step||1));setValue(nv);setTxt(String(nv));}
         }}
-        style={{flex:1,minWidth:0,background:"#0d1a2e",border:"1px solid #1a2744",borderRadius:3,padding:"3px 6px",color:color||"#c8d6e5",fontFamily:"inherit",fontSize:11,fontWeight:700,textAlign:"right",outline:"none"}}/>
-      <span style={{fontSize:8,color:"#3a5a7a",width:28,flexShrink:0,textAlign:"left"}}>{unit}</span>
+        style={{flex:1,minWidth:0,background:"#0d1a2e",border:"1px solid #1a2744",borderRadius:3,padding:"4px 6px",color:color||"#c8d6e5",fontFamily:"inherit",fontSize:13,fontWeight:700,textAlign:"right",outline:"none"}}/>
+      <span style={{fontSize:10,color:"#3a5a7a",width:32,flexShrink:0,textAlign:"left"}}>{unit}</span>
     </div>);
 }
 
 // ══════════════════════════════════════════════════════════════
 export default function Dashboard(){
-  const [view,setView]=useState("schedule");
+  // ── Responsive ──────────────────────────────────────────────
+  const [winW,setWinW]=useState(typeof window!=="undefined"?window.innerWidth:1200);
+  useEffect(()=>{const h=()=>setWinW(window.innerWidth);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);
+  const mob=winW<768,tab=winW>=768&&winW<1080;
+  // Font scale: bumps all sizes for readability
+  const f=(base)=>mob?Math.round(base*1.6):tab?Math.round(base*1.2):Math.round(base*1.15);
+  const [selDay,setSelDay]=useState("Thu");
 
   // ── Battery state ──────────────────────────────────────────
   const [battMW,setBattMW_]=useState(40);
-  const [battMWh,setBattMWh_]=useState(160);
-  const [chgMW,setChgMW_]=useState(10);
-  const [disMW,setDisMW_]=useState(10);
+  const [battMWh,setBattMWh_]=useState(80);
+  const [chgMW,setChgMW_]=useState(40);
+  const [disMW,setDisMW_]=useState(40);
   const [rte,setRte]=useState(87);
   const [minSoc,setMinSoc_]=useState(10);
-  const [maxSoc,setMaxSoc_]=useState(90);
+  const [maxSoc,setMaxSoc_]=useState(95);
   const [startSoc,setStartSoc_]=useState(50);
-  const [battPreset,setBattPreset]=useState("4hr Rate-Ltd");
+  const [battPreset,setBattPreset]=useState("2hr Peaker");
   const [fleetN,setFleetN]=useState(1);
 
   // Cascading setters
@@ -269,7 +274,6 @@ export default function Dashboard(){
   const disRatio=battMW>0?(disMW/battMW*100):100;
 
   // ── Forecast state ─────────────────────────────────────────
-  const [selDay,setSelDay]=useState("Thu");
   const [supAcc,setSupAcc]=useState(85);
   const [demAcc,setDemAcc]=useState(75);
   const [crdAcc,setCrdAcc]=useState(70);
@@ -278,7 +282,7 @@ export default function Dashboard(){
 
   // ── Schedule state (shared across both tabs) ───────────────
   const [sch,setSch]=useState(()=>{
-    const ib={mw:40,mwh:160,chgMW:10,disMW:10,rte:0.87,minSoc:10,maxSoc:90};
+    const ib={mw:40,mwh:80,chgMW:40,disMW:40,rte:0.87,minSoc:10,maxSoc:95};
     return buildWeekSch(ib,50,0,0,0,"dam");
   });
   const [schP,setSchP]=useState("Naive");
@@ -302,6 +306,11 @@ export default function Dashboard(){
   const [rec,setRec]=useState(null);
   const [manual,setManual]=useState(null);
   const prevRT=useRef(null);const tickRef=useRef(null);
+  const [colL,setColL]=useState(false);
+  const [colR,setColR]=useState(false);
+  const [battOpen,setBattOpen]=useState(true);
+  const [profitOpen,setProfitOpen]=useState(true);
+  const [mobPanel,setMobPanel]=useState("center"); // mobile: "trade","center","config"
 
   // Sync day selection to sim when running
   useEffect(()=>{if(running)setSelDay(DAYS[simD]);},[running,simD]);
@@ -425,23 +434,22 @@ export default function Dashboard(){
   },[ticks]);
 
   // ── Styles ─────────────────────────────────────────────────
-  const P={background:"#0b1628",border:"1px solid #1a2744",borderRadius:"6px",padding:"8px"};
-  const LB={fontSize:"8px",fontWeight:700,letterSpacing:".1em",color:"#4a6a8a",textTransform:"uppercase",marginBottom:"4px"};
-  const tabS=a=>({padding:"5px 14px",borderRadius:"4px 4px 0 0",cursor:"pointer",fontFamily:"inherit",fontSize:10,fontWeight:700,letterSpacing:".06em",border:"none",background:a?"#0b1628":"transparent",color:a?"#22d3ee":"#3a5a7a",borderBottom:a?"2px solid #22d3ee":"2px solid transparent"});
-  const DR=({l,v,c})=>(<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"1.5px 0"}}><span style={{fontSize:7,color:"#3a5a7a"}}>{l}</span><span style={{fontSize:8,fontWeight:700,color:c}}>{v}</span></div>);
+  const P={background:"#0b1628",border:"1px solid #1a2744",borderRadius:"6px",padding:mob?"10px 12px":"8px"};
+  const LB={fontSize:f(8),fontWeight:700,letterSpacing:".1em",color:"#4a6a8a",textTransform:"uppercase",marginBottom:mob?"6px":"4px"};
+  const DR=({l,v,c})=>(<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:mob?"3px 0":"1.5px 0"}}><span style={{fontSize:f(7),color:"#3a5a7a"}}>{l}</span><span style={{fontSize:f(8),fontWeight:700,color:c}}>{v}</span></div>);
 
   // ── Shared schedule action buttons ─────────────────────────
-  const SchBtns=({compact})=>(
-    <div style={{display:"flex",gap:2}}>
-      <button onClick={()=>{setSch(buildWeekSch(batt,startSoc,0,0,0,"dam"));setSchP("Naive");}} style={{padding:"2px 5px",borderRadius:3,fontSize:7,fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:schP==="Naive"?"1px solid #94a3b8":"1px solid #1a2744",background:schP==="Naive"?"#94a3b815":"#0d1a2e",color:schP==="Naive"?"#94a3b8":"#4a6a8a"}}>Naive</button>
-      <button onClick={()=>{setSch(buildWeekSch(batt,startSoc,supAcc,demAcc,crdAcc,"fc"));setSchP("Optimized");}} style={{padding:"2px 5px",borderRadius:3,fontSize:7,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:schP==="Optimized"?"1px solid #22c55e":"1px solid #22c55e60",background:schP==="Optimized"?"#22c55e20":"linear-gradient(135deg,#22c55e15,#3b82f615)",color:"#22c55e",boxShadow:schP==="Optimized"?"0 0 6px #22c55e20":"none"}}>{compact?"\u2728 Opt":"\u2728 Optimize"}</button>
-      <button onClick={()=>{setSch(p=>{const c={...p};DAYS.forEach(d=>{c[d]=Array(24).fill("H");});return c;});setSchP("Clear");}} style={{padding:"2px 5px",borderRadius:3,fontSize:7,fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:schP==="Clear"?"1px solid #60a5fa":"1px solid #1a2744",background:schP==="Clear"?"#3b82f615":"#0d1a2e",color:schP==="Clear"?"#60a5fa":"#4a6a8a"}}>Clear</button>
-    </div>
-  );
+  const SchBtns=()=>{const bs={flex:1,minWidth:0,borderRadius:3,cursor:"pointer",fontFamily:"inherit",fontSize:f(8),fontWeight:600,padding:"3px 0",textAlign:"center"};return(
+    <div style={{display:"flex",gap:2,minWidth:0}}>
+      <button onClick={()=>{setSch(buildWeekSch(batt,startSoc,0,0,0,"dam"));setSchP("Naive");}} style={{...bs,border:schP==="Naive"?"1px solid #94a3b8":"1px solid #1a2744",background:schP==="Naive"?"#94a3b820":"#0d1a2e",color:schP==="Naive"?"#94a3b8":"#4a6a8a"}}>Naive</button>
+      <button onClick={()=>{setSch(buildWeekSch(batt,startSoc,supAcc,demAcc,crdAcc,"fc"));setSchP("Optimized");}} style={{...bs,border:schP==="Optimized"?"1px solid #22c55e":"1px solid #1a2744",background:schP==="Optimized"?"#22c55e20":"#0d1a2e",color:schP==="Optimized"?"#22c55e":"#4a6a8a"}}>{"\u2728"} Optimize</button>
+      <button onClick={()=>{setSch(p=>{const c={...p};DAYS.forEach(d=>{c[d]=Array(24).fill("H");});return c;});setSchP("Clear");}} style={{...bs,border:schP==="Clear"?"1px solid #60a5fa":"1px solid #1a2744",background:schP==="Clear"?"#3b82f620":"#0d1a2e",color:schP==="Clear"?"#60a5fa":"#4a6a8a"}}>Clear</button>
+    </div>);
+  };
 
   // ── Shared override buttons ────────────────────────────────
   const OvrBtns=({compact})=>{
-    const items=[{m:"CHARGE",s:"CHG",c:"#3b82f6",dis:soc>=maxSoc},{m:"DISCHARGE",s:"DIS",c:"#22c55e",dis:soc<=minSoc},{m:"HOLD",s:"HLD",c:"#94a3b8",dis:false}];
+    const items=[{m:"CHARGE",s:"Charge",c:"#3b82f6",dis:soc>=maxSoc},{m:"DISCHARGE",s:"Discharge",c:"#22c55e",dis:soc<=minSoc},{m:"HOLD",s:"HOLD",c:"#94a3b8",dis:false}];
     const canRtOpt=ticks.length>=2&&running;
     return(
     <div style={{display:"flex",flexDirection:"column",gap:compact?2:3,minWidth:0}}>
@@ -459,422 +467,382 @@ export default function Dashboard(){
   // ── Shared schedule grid ───────────────────────────────────
   const SchGrid=({compact})=>{
     const DAY_SHORT=["M","T","W","Th","F","Sa","Su"];
+    const cellH=compact?(mob?14:9):mob?20:14;
+    const headH=compact?(mob?14:10):mob?20:14;
     return(
     <div style={{display:"flex",gap:0,userSelect:"none"}}>
-      <div style={{width:compact?14:20,paddingTop:compact?10:14,display:"flex",flexDirection:"column"}}>
-        {Array.from({length:24},(_,h)=>(<div key={h} style={{height:compact?9:14,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:1}}><span style={{fontSize:compact?5:7,color:hovH===h?"#22d3ee":"#3a5a7a",fontWeight:hovH===h?700:400}}>{String(h).padStart(2,"0")}</span></div>))}
+      <div style={{width:compact?14:mob?24:20,paddingTop:headH,display:"flex",flexDirection:"column"}}>
+        {Array.from({length:24},(_,h)=>(<div key={h} style={{height:cellH,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:1}}><span style={{fontSize:compact?5:f(7),color:hovH===h?"#22d3ee":"#3a5a7a",fontWeight:hovH===h?700:400}}>{String(h).padStart(2,"0")}</span></div>))}
       </div>
       {DAYS.map((day,di)=>(
         <div key={day} style={{flex:1,minWidth:0}}>
-          <div style={{textAlign:"center",height:compact?10:14,overflow:"hidden"}}><span style={{fontSize:compact?6:8,fontWeight:600,color:day===selDay?"#22d3ee":running&&di===simD?"#f59e0b":"#3a5a7a"}}>{compact?DAY_SHORT[di]:day}</span></div>
+          <div style={{textAlign:"center",height:headH,overflow:"hidden"}}><span style={{fontSize:compact?6:f(8),fontWeight:600,color:day===selDay?"#22d3ee":running&&di===simD?"#f59e0b":"#3a5a7a"}}>{compact?DAY_SHORT[di]:day}</span></div>
           {Array.from({length:24},(_,h)=>{const m=sch[day][h],cur=running&&di===simD&&h===simH,hov=hovH===h&&day===selDay;return(
-            <div key={h} onMouseDown={e=>{e.preventDefault();cellDn(day,h);}} onMouseEnter={()=>cellEn(day,h)} style={{height:compact?9:14,margin:"0.5px",borderRadius:1,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",background:m==="H"?"#0d1a2e":MC[m]+"80",border:cur?"1.5px solid #22d3ee":hov?"1px solid #f59e0b40":"1px solid "+(m==="H"?"#151f30":MC[m]+"40")}}>
-              <span style={{fontSize:compact?4:6,fontWeight:700,color:m==="H"?"#1a2744":"#fff",opacity:m==="H"?0:.7}}>{ML[m]}</span>
+            <div key={h} onMouseDown={e=>{e.preventDefault();cellDn(day,h);}} onMouseEnter={()=>cellEn(day,h)} style={{height:cellH,margin:"0.5px",borderRadius:1,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",background:m==="H"?"#0d1a2e":MC[m]+"80",border:cur?"1.5px solid #22d3ee":hov?"1px solid #f59e0b40":"1px solid "+(m==="H"?"#151f30":MC[m]+"40")}}>
+              <span style={{fontSize:compact?4:f(6),fontWeight:700,color:m==="H"?"#1a2744":"#fff",opacity:m==="H"?0:.7}}>{ML[m]}</span>
             </div>);})}
         </div>))}
-      {!compact&&<div style={{width:60,marginLeft:4,paddingTop:14}}>
-        <div style={{fontSize:6,color:"#3a5a7a",textAlign:"center",fontWeight:600,marginBottom:1}}>SOC</div>
+      {!compact&&<div style={{width:mob?70:60,marginLeft:4,paddingTop:headH}}>
+        <div style={{fontSize:f(7),color:"#3a5a7a",textAlign:"center",fontWeight:600,marginBottom:1}}>SOC</div>
         {socTraj.map((t,h)=>(
-          <div key={h} style={{height:14,display:"flex",alignItems:"center",gap:1,margin:"0.5px 0"}}>
-            <div style={{flex:1,height:6,background:"#0d1a2e",borderRadius:2,overflow:"hidden",position:"relative"}}>
+          <div key={h} style={{height:cellH,display:"flex",alignItems:"center",gap:1,margin:"0.5px 0"}}>
+            <div style={{flex:1,height:mob?8:6,background:"#0d1a2e",borderRadius:2,overflow:"hidden",position:"relative"}}>
               <div style={{position:"absolute",left:minSoc+"%",top:0,width:1,height:"100%",background:"#ef444440"}}/>
               <div style={{position:"absolute",left:maxSoc+"%",top:0,width:1,height:"100%",background:"#22c55e40"}}/>
               <div style={{height:"100%",width:t.soc+"%",borderRadius:2,background:t.clipHi?"#22c55e":t.clipLo?"#ef4444":t.soc>60?"#22c55e50":t.soc>30?"#f59e0b50":"#ef444450"}}/>
             </div>
-            <span style={{fontSize:6,color:t.clipHi?"#22c55e":t.clipLo?"#ef4444":"#3a5a7a",fontWeight:t.clip?700:400,width:18,textAlign:"right"}}>{t.soc.toFixed(0)}</span>
+            <span style={{fontSize:f(7),color:t.clipHi?"#22c55e":t.clipLo?"#ef4444":"#3a5a7a",fontWeight:t.clip?700:400,width:mob?22:18,textAlign:"right"}}>{t.soc.toFixed(0)}</span>
           </div>))}
       </div>}
     </div>);
   };
 
-  // ── Live trade strip (shown on Schedule tab when sim has data) ─
-  const TradeStrip=()=>{
-    if(!running&&ticks.length===0)return null;
-    return(
-      <div style={{...P,display:"flex",alignItems:"center",gap:10,padding:"5px 10px",border:"1px solid "+(running?"#22d3ee30":"#1a2744")}}>
-        <div style={{display:"flex",alignItems:"center",gap:3}}>
-          <div style={{width:6,height:6,borderRadius:"50%",background:running?"#22c55e":"#4a6a8a",boxShadow:running?"0 0 6px #22c55e":"none"}}/>
-          <span style={{fontSize:8,fontWeight:700,color:running?"#22c55e":"#4a6a8a"}}>{running?"LIVE":"PAUSED"}</span>
-        </div>
-        <div style={{width:1,height:14,background:"#1a2744"}}/>
-        {[{l:"Time",v:last?DAYS[simD]+" "+last.time:"--",c:"#60a5fa"},
-          {l:"RT",v:last?"$"+last.rt:"--",c:"#22d3ee"},
-          {l:"SOC",v:soc.toFixed(0)+"%",c:soc>60?"#22c55e":soc>30?"#f59e0b":"#ef4444"},
-          {l:"P&L",v:(uPnl>=0?"+":"")+"$"+uPnl.toFixed(0),c:uPnl>=0?"#22c55e":"#ef4444"},
-        ].map((m,i)=>(<div key={i} style={{textAlign:"center"}}><div style={{fontSize:10,fontWeight:800,color:m.c,lineHeight:1}}>{m.v}</div><div style={{fontSize:6,color:"#4a6a8a",fontWeight:600}}>{m.l}</div></div>))}
-        <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:4}}>
-          <div style={{padding:"2px 6px",borderRadius:3,background:(MC[eMode]||"#94a3b8")+"15",border:"1px solid "+(MC[eMode]||"#94a3b8")+"30"}}>
-            <span style={{fontSize:8,fontWeight:800,color:MC[eMode]||"#94a3b8"}}>{eMode}</span>
-          </div>
-          {manual&&<span style={{fontSize:6,fontWeight:700,color:"#f59e0b"}}>OVR</span>}
-          <button onClick={()=>setView("trade")} style={{padding:"2px 6px",borderRadius:3,border:"1px solid #1a2744",background:"#0d1a2e",color:"#4a6a8a",fontFamily:"inherit",fontSize:7,cursor:"pointer",fontWeight:600}}>TRADE {"\u2192"}</button>
-        </div>
-      </div>
-    );};
-
   // ══════════════════════════════════════════════════════════
   return(
-    <div style={{background:"#070e1a",color:"#c8d6e5",fontFamily:"'JetBrains Mono','SF Mono','Fira Code',monospace",minHeight:"100vh",padding:"10px",fontSize:"11px"}} onMouseUp={()=>setPainting(false)}>
+    <div style={{background:"#070e1a",color:"#c8d6e5",fontFamily:"'JetBrains Mono','SF Mono','Fira Code',monospace",minHeight:"100vh",padding:mob?"8px":"10px",fontSize:f(10)}} onMouseUp={()=>setPainting(false)}>
 
       {/* HEADER */}
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6,paddingBottom:5,borderBottom:"1px solid #1a2744"}}>
+      <div style={{display:"flex",flexDirection:mob?"column":"row",alignItems:mob?"stretch":"center",justifyContent:"space-between",marginBottom:6,paddingBottom:5,borderBottom:"1px solid #1a2744",gap:mob?8:0}}>
         <div>
-          <div style={{fontSize:13,fontWeight:800,letterSpacing:".08em",background:"linear-gradient(90deg,#22d3ee,#3b82f6)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>BESS CROWDING STRATEGY + REALTIME TRADING</div>
-          <div style={{fontSize:8,color:"#3a5a7a",marginTop:1}}>ERCOT North Hub Jul 2024 &middot; {battMW}MW / {battMWh}MWh ({duration.toFixed(1)}hr) &middot; {rte}% RTE &middot; Chg {chgMW} / Dis {disMW} MW/h &middot; SOC {minSoc}-{maxSoc}%{fleetN>1?<span style={{color:"#a855f7"}}> &middot; {fleetN} units = {(battMW*fleetN).toLocaleString()}MW fleet</span>:null}</div>
-        </div>
-        <div style={{display:"flex",gap:4,alignItems:"center"}}>
-          <button onClick={()=>setView("schedule")} style={tabS(view==="schedule")}>SCHEDULE</button>
-          <button onClick={()=>setView("trade")} style={tabS(view==="trade")}>TRADE</button>
-          <div style={{width:1,height:20,background:"#1a2744",margin:"0 4px"}}/>
-          {[{l:"1x",v:2000},{l:"2x",v:1000},{l:"5x",v:400}].map(s=>(
-            <button key={s.v} onClick={()=>setSpeed(s.v)} style={{padding:"3px 7px",borderRadius:3,border:speed===s.v?"1px solid #3b82f6":"1px solid #1a2744",background:speed===s.v?"#3b82f620":"#0d1a2e",color:speed===s.v?"#60a5fa":"#4a6a8a",fontFamily:"inherit",fontSize:9,fontWeight:600,cursor:"pointer"}}>{s.l}</button>))}
-          <button onClick={()=>setRunning(!running)} style={{padding:"3px 10px",borderRadius:3,border:"1px solid "+(running?"#ef4444":"#22c55e"),background:(running?"#ef4444":"#22c55e")+"20",color:running?"#ef4444":"#22c55e",fontFamily:"inherit",fontSize:9,fontWeight:700,cursor:"pointer",minWidth:48}}>{running?"\u25A0 STOP":"\u25B6 RUN"}</button>
-          <button onClick={reset} style={{padding:"3px 7px",borderRadius:3,border:"1px solid #1a2744",background:"#0d1a2e",color:"#4a6a8a",fontFamily:"inherit",fontSize:9,fontWeight:600,cursor:"pointer"}}>RESET</button>
+          <div style={{fontSize:f(14),fontWeight:800,letterSpacing:".08em",background:"linear-gradient(90deg,#22d3ee,#3b82f6)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>BESS CROWDING STRATEGY + REALTIME TRADING</div>
+          <div style={{fontSize:f(8),color:"#3a5a7a",marginTop:1}}>ERCOT North Hub Jul 2024 &middot; {battMW}MW / {battMWh}MWh ({duration.toFixed(1)}hr) &middot; {rte}% RTE &middot; Chg {chgMW} / Dis {disMW} MW/h &middot; SOC {minSoc}-{maxSoc}%{fleetN>1?<span style={{color:"#a855f7"}}> &middot; {fleetN} units = {(battMW*fleetN).toLocaleString()}MW fleet</span>:null}</div>
         </div>
       </div>
 
-      {/* ══════════ SCHEDULE TAB ══════════ */}
-      {view==="schedule"&&(
-        <div style={{display:"flex",flexDirection:"column",gap:6}}>
-          {/* Live trade strip (when sim is running or has data) */}
-          <TradeStrip/>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 220px",gap:8}}>
-            {/* LEFT */}
-            <div style={{display:"flex",flexDirection:"column",gap:6}}>
-              {/* Day tabs */}
-              <div style={{display:"flex",gap:3}}>
-                {DAYS.map((d,i)=>(
-                  <button key={d} onClick={()=>setSelDay(d)} style={{flex:1,padding:"4px 2px",borderRadius:4,cursor:"pointer",fontFamily:"inherit",textAlign:"center",fontSize:9,fontWeight:700,border:selDay===d?"1px solid #22d3ee":"1px solid #1a2744",background:selDay===d?"#22d3ee15":"#0d1a2e",color:selDay===d?"#22d3ee":(running&&i===simD?"#f59e0b":"#4a6a8a")}}>
-                    <div>{d}</div><div style={{fontSize:7,fontWeight:400,color:"#3a5a7a"}}>{WEEK[d].date}</div>
-                  </button>))}
-              </div>
-              {/* Context */}
-              <div style={{display:"flex",gap:8,padding:"4px 8px",...P,flexWrap:"wrap"}}>
-                {[{l:"DA Avg",v:"$"+(dayD.d.reduce((a,r)=>a+r[1],0)/24).toFixed(0),c:"#94a3b8"},{l:"RT Avg",v:"$"+(dayD.d.reduce((a,r)=>a+r[2],0)/24).toFixed(0),c:"#22d3ee"},{l:"Crowd",v:crowdPct.toFixed(0)+"%",c:"#ef4444"},{l:"MAE",v:"$"+mae.toFixed(1),c:"#f59e0b"},{l:"",v:dayD.note,c:"#5a7a9a",w:true}].map((m,i)=>(
-                  <div key={i} style={{display:"flex",gap:3,alignItems:"center",flex:m.w?1:0,whiteSpace:"nowrap"}}>
-                    {m.l&&<span style={{fontSize:7,color:"#3a5a7a",fontWeight:600}}>{m.l}</span>}
-                    <span style={{fontSize:9,fontWeight:700,color:m.c}}>{m.v}</span>
-                  </div>))}
-              </div>
-              {/* Price chart */}
-              <div style={P}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
-                  <div style={LB}>{dayD.label} PRICE CURVES</div>
-                  <div style={{display:"flex",gap:10}}>
-                    {[{l:"DAM",c:"#94a3b8",d:true},{l:"Forecast",c:"#f59e0b"},{l:"RTM",c:"#22d3ee"}].map(x=>(
-                      <div key={x.l} style={{display:"flex",alignItems:"center",gap:3}}>
-                        <svg width="12" height="2"><line x1="0" y1="1" x2="12" y2="1" stroke={x.c} strokeWidth="1.5" strokeDasharray={x.d?"3,2":"none"}/></svg>
-                        <span style={{fontSize:7,color:"#4a6a8a"}}>{x.l}</span></div>))}
-                  </div>
-                </div>
-                <svg width="100%" viewBox={"0 0 "+CW+" "+CH} style={{display:"block"}}
-                  onMouseMove={e=>{const r=e.currentTarget.getBoundingClientRect();const mx=(e.clientX-r.left)/r.width*CW;const h=Math.round(((mx-PD.l)/pW)*23);setHovH(h>=0&&h<=23?h:null);}}
-                  onMouseLeave={()=>setHovH(null)}>
-                  {cp.yT.map(t=><g key={t.v}><line x1={PD.l} y1={t.py} x2={CW-PD.r} y2={t.py} stroke="#1a2744" strokeWidth=".5"/><text x={PD.l-3} y={t.py+3} textAnchor="end" fill="#3a5a7a" fontSize="7" fontFamily="inherit">${t.v}</text></g>)}
-                  {[0,4,8,12,16,20].map(h=><text key={h} x={cp.x(h)} y={CH-3} textAnchor="middle" fill="#3a5a7a" fontSize="7" fontFamily="inherit">HE{h}</text>)}
-                  {fcs.map((f,i)=>{const m=cp.sch[i];return m!=="H"&&<rect key={i} x={cp.x(i)-pW/48} y={PD.t} width={pW/24} height={pH} fill={MC[m]} opacity=".08"/>;})}
-                  {cp.gap.map((g,i)=>i<23&&<rect key={i} x={g.x} y={g.u} width={pW/24} height={Math.max(1,g.lo-g.u)} fill={g.f} opacity=".06"/>)}
-                  <path d={cp.dP} fill="none" stroke="#94a3b8" strokeWidth="1" strokeDasharray="4,3" opacity=".5"/>
-                  <path d={cp.fP} fill="none" stroke="#f59e0b" strokeWidth="1.5"/>
-                  <path d={cp.rP} fill="none" stroke="#22d3ee" strokeWidth="1.5"/>
-                  {hovH!==null&&(()=>{const f=fcs[hovH],hx=cp.x(hovH);return(<g>
-                    <line x1={hx} y1={PD.t} x2={hx} y2={PD.t+pH} stroke="#ffffff20" strokeWidth="1"/>
-                    <circle cx={hx} cy={cp.y(f.dam)} r="2.5" fill="#94a3b8"/><circle cx={hx} cy={cp.y(f.fc)} r="2.5" fill="#f59e0b"/><circle cx={hx} cy={cp.y(f.rtm)} r="2.5" fill="#22d3ee"/>
-                    <text x={hx+4} y={PD.t+10} fill="#94a3b8" fontSize="7" fontFamily="inherit">DA ${f.dam}</text>
-                    <text x={hx+4} y={PD.t+20} fill="#f59e0b" fontSize="7" fontFamily="inherit">FC ${f.fc.toFixed(0)}</text>
-                    <text x={hx+4} y={PD.t+30} fill="#22d3ee" fontSize="7" fontFamily="inherit">RT ${f.rtm}</text>
-                  </g>);})()}
-                </svg>
-              </div>
-              {/* Schedule grid */}
-              <div style={P}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
-                  <div style={{display:"flex",alignItems:"center",gap:6}}>
-                    <div style={LB}>CHARGE / DISCHARGE SCHEDULE</div>
-                    {schP&&<div style={{fontSize:7,fontWeight:600,padding:"1px 5px",borderRadius:2,background:schP==="Optimized"?"#22c55e15":schP==="RT Opt"?"#f59e0b15":schP==="Naive"?"#94a3b815":"#1a274440",border:"1px solid "+(schP==="Optimized"?"#22c55e30":schP==="RT Opt"?"#f59e0b30":schP==="Naive"?"#94a3b830":"#1a2744"),color:schP==="Optimized"?"#22c55e":schP==="RT Opt"?"#f59e0b":schP==="Naive"?"#94a3b8":"#4a6a8a"}}>{schP}</div>}
-                    {clipN>0&&<div style={{fontSize:7,fontWeight:700,padding:"1px 5px",borderRadius:2,background:"#f59e0b15",border:"1px solid #f59e0b30",color:"#f59e0b"}}>{clipN} partial</div>}
-                  </div>
-                  <SchBtns/>
-                </div>
-                <SchGrid compact={false}/>
-                <div style={{fontSize:7,color:"#3a5a7a",marginTop:3}}>
-                  Click: <span style={{color:"#3b82f6"}}>CHG</span> {"\u2192"} <span style={{color:"#22c55e"}}>DIS</span> {"\u2192"} HOLD. Drag to paint.
-                  {clipN>0&&<span style={{color:"#f59e0b"}}> {clipN}hr partial: SOC near {minSoc}% or {maxSoc}% limit, battery charges/discharges at reduced rate.</span>}
-                </div>
-              </div>
-              {/* Revenue */}
-              <div style={{...P,padding:"8px 12px"}}>
-                {/* Row 1: Per Unit / Day */}
-                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
-                  <div style={{fontSize:7,fontWeight:700,color:"#4a6a8a",letterSpacing:".06em",width:52,flexShrink:0}}>PER UNIT<br/><span style={{fontWeight:400,fontSize:6}}>/day</span></div>
-                  <div style={{flex:1,display:"flex",justifyContent:"space-around",alignItems:"center"}}>
-                    {[{l:"Naive Profit",v:revNaive,c:"#94a3b8"},{l:"Your Profit",v:revYours,c:"#22d3ee"},{l:"Perfect Profit",v:revPerf,c:"#22c55e"}].map((r,i,a)=>(
-                      <div key={r.l} style={{display:"flex",alignItems:"center",gap:6}}>
-                        <div style={{textAlign:"center"}}>
-                          <div style={{fontSize:6,fontWeight:600,color:"#4a6a8a",textTransform:"uppercase"}}>{r.l}</div>
-                          <div style={{fontSize:16,fontWeight:800,color:r.c}}>{fmtDol(r.v)}</div>
-                        </div>
-                        {i<a.length-1&&<div style={{width:1,height:24,background:"#1a2744"}}/>}
-                      </div>))}
-                  </div>
-                </div>
-                {/* Row 2: Fleet / Day (only when fleet > 1) */}
-                {fleetN>1&&<div style={{display:"flex",alignItems:"center",gap:6,paddingTop:6,borderTop:"1px solid #1a2744",marginBottom:4}}>
-                  <div style={{fontSize:7,fontWeight:700,color:"#a855f7",letterSpacing:".06em",width:52,flexShrink:0}}>FLEET<br/><span style={{fontWeight:400,fontSize:6}}>/day</span></div>
-                  <div style={{flex:1,display:"flex",justifyContent:"space-around",alignItems:"center"}}>
-                    {[{l:"Naive Profit",v:revNaive*fleetN,c:"#94a3b8"},{l:"Your Profit",v:revYours*fleetN,c:"#22d3ee"},{l:"Perfect Profit",v:revPerf*fleetN,c:"#22c55e"}].map((r,i,a)=>(
-                      <div key={r.l} style={{display:"flex",alignItems:"center",gap:6}}>
-                        <div style={{textAlign:"center"}}>
-                          <div style={{fontSize:6,fontWeight:600,color:"#4a6a8a",textTransform:"uppercase"}}>{r.l}</div>
-                          <div style={{fontSize:14,fontWeight:800,color:r.c}}>{fmtDol(r.v)}</div>
-                        </div>
-                        {i<a.length-1&&<div style={{width:1,height:20,background:"#1a2744"}}/>}
-                      </div>))}
-                  </div>
-                </div>}
-                {/* Row 3: Fleet / Year (or Annual if single unit) */}
-                {(()=>{const mult=fleetN;
-                  return <div style={{display:"flex",alignItems:"center",gap:6,paddingTop:6,borderTop:"1px solid #1a2744"}}>
-                    <div style={{fontSize:7,fontWeight:700,color:fleetN>1?"#a855f7":"#4a6a8a",letterSpacing:".06em",width:52,flexShrink:0}}>{fleetN>1?"FLEET":"ANNUAL"}<br/><span style={{fontWeight:400,fontSize:6}}>/year</span></div>
-                    <div style={{flex:1,display:"flex",justifyContent:"space-around",alignItems:"center"}}>
-                      {[{l:"Naive Profit",v:revNaive*mult*365,c:"#94a3b8"},{l:"Your Profit",v:revYours*mult*365,c:"#22d3ee"},{l:"Perfect Profit",v:revPerf*mult*365,c:"#22c55e"}].map((r,i,a)=>(
-                        <div key={r.l} style={{display:"flex",alignItems:"center",gap:6}}>
-                          <div style={{textAlign:"center"}}>
-                            <div style={{fontSize:6,fontWeight:600,color:"#4a6a8a",textTransform:"uppercase"}}>{r.l}</div>
-                            <div style={{fontSize:13,fontWeight:800,color:r.c}}>{fmtDol(r.v)}</div>
-                          </div>
-                          {i<a.length-1&&<div style={{width:1,height:20,background:"#1a2744"}}/>}
-                        </div>))}
-                    </div>
-                  </div>;
-                })()}
-              </div>
-              {/* Uplift bar */}
-              {(()=>{const uplift=(revYours-revNaive)*fleetN*365,ceiling=(revPerf-revNaive)*fleetN*365,pct=ceiling>0?Math.min(100,Math.max(0,(uplift/ceiling)*100)):0;
-                return(<div style={{...P,padding:"5px 10px"}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
-                    <span style={{fontSize:7,color:"#4a6a8a",fontWeight:600}}>FORECAST VALUE CAPTURE{fleetN>1?" (FLEET)":""}</span>
-                    <span style={{fontSize:9,fontWeight:800,color:uplift>=0?"#22c55e":"#ef4444"}}>{uplift>=0?"+":""}{fmtDol(uplift)}/yr vs Naive ({pct.toFixed(0)}%)</span>
-                  </div>
-                  <div style={{height:4,background:"#0d1a2e",borderRadius:2,overflow:"hidden",position:"relative"}}>
-                    <div style={{position:"absolute",height:"100%",width:pct+"%",borderRadius:2,background:uplift>=0?"linear-gradient(90deg,#22c55e80,#22c55e)":"#ef444480",transition:"width .3s"}}/>
-                  </div>
-                </div>);
-              })()}
-            </div>
+      {/* Mobile nav bar */}
+      {mob&&<div style={{display:"flex",gap:0,marginBottom:8,background:"#0b1628",borderRadius:6,border:"1px solid #1a2744",overflow:"hidden"}}>
+        {[{k:"trade",icon:"\u25B6",label:"Trade",c:"#22c55e"},{k:"center",icon:"\u2637",label:"Charts",c:"#22d3ee"},{k:"config",icon:"\u2699",label:"Config",c:"#f59e0b"}].map(t=>(
+          <button key={t.k} onClick={()=>setMobPanel(t.k)} style={{flex:1,padding:"10px 0",border:"none",borderBottom:mobPanel===t.k?"2px solid "+t.c:"2px solid transparent",background:mobPanel===t.k?t.c+"10":"transparent",cursor:"pointer",fontFamily:"inherit",textAlign:"center"}}>
+            <div style={{fontSize:16,lineHeight:1}}>{t.icon}</div>
+            <div style={{fontSize:f(7),fontWeight:700,color:mobPanel===t.k?t.c:"#4a6a8a",marginTop:2,letterSpacing:".06em"}}>{t.label}</div>
+          </button>))}
+      </div>}
 
-            {/* ═══ RIGHT COLUMN ═══ */}
-            <div style={{display:"flex",flexDirection:"column",gap:6}}>
-              {/* BATTERY CONSTRAINTS */}
-              <div style={{...P,border:"1px solid #22d3ee25"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                  <div style={{...LB,color:"#22d3ee",marginBottom:0}}>BATTERY CONSTRAINTS</div>
-                  {battPreset&&<div style={{fontSize:7,fontWeight:600,color:"#22d3ee",padding:"1px 5px",background:"#22d3ee10",borderRadius:2,border:"1px solid #22d3ee30"}}>{battPreset}</div>}
-                </div>
-                <div style={{display:"flex",gap:3,flexWrap:"wrap",marginBottom:8}}>
-                  {Object.entries(BATT_PRESETS).map(([n,p])=>(
-                    <button key={n} onClick={()=>applyBP(n,p)} style={{padding:"3px 6px",borderRadius:3,cursor:"pointer",fontFamily:"inherit",fontSize:7,fontWeight:600,border:battPreset===n?"1px solid #22d3ee":"1px solid #1a2744",background:battPreset===n?"#22d3ee10":"#0d1a2e",color:battPreset===n?"#22d3ee":"#5a7a9a"}}>{n}</button>))}
-                </div>
-                <div style={{fontSize:7,color:"#3a5a7a",fontWeight:700,letterSpacing:".06em",marginBottom:3}}>NAMEPLATE</div>
-                <NumField label="Power" value={battMW} setValue={setBattMW} min={1} max={500} step={5} unit="MW" color="#22d3ee"/>
-                <NumField label="Capacity" value={battMWh} setValue={setBattMWh} min={1} max={2000} step={10} unit="MWh" color="#22d3ee"/>
-                <NumField label="RTE" value={rte} setValue={v=>{setRte(Math.max(50,Math.min(100,v)));setBattPreset(null);}} min={50} max={100} step={1} unit="%" color="#f59e0b"/>
-                <div style={{height:1,background:"#1a274480",margin:"6px 0"}}/>
-                <div style={{fontSize:7,color:"#3a5a7a",fontWeight:700,letterSpacing:".06em",marginBottom:3}}>RATE LIMITS</div>
-                <NumField label="Charge" value={chgMW} setValue={setChgMW} min={1} max={battMW} step={1} unit="MW/h" color="#3b82f6"/>
-                <NumField label="Discharge" value={disMW} setValue={setDisMW} min={1} max={battMW} step={1} unit="MW/h" color="#22c55e"/>
-                {(chgMW<battMW||disMW<battMW)&&(<div style={{margin:"4px 0 0",padding:"3px 6px",background:"#f59e0b06",borderRadius:3,border:"1px solid #f59e0b15",fontSize:7,color:"#f59e0b",lineHeight:1.5}}>{chgMW<battMW&&<span>Chg {chgRatio.toFixed(0)}%</span>}{chgMW<battMW&&disMW<battMW&&" / "}{disMW<battMW&&<span>Dis {disRatio.toFixed(0)}%</span>} of nameplate</div>)}
-                <div style={{height:1,background:"#1a274480",margin:"6px 0"}}/>
-                <div style={{fontSize:7,color:"#3a5a7a",fontWeight:700,letterSpacing:".06em",marginBottom:3}}>SOC BOUNDS</div>
-                <NumField label="Min SOC" value={minSoc} setValue={setMinSoc} min={0} max={maxSoc-1} step={1} unit="%" color="#ef4444"/>
-                <NumField label="Max SOC" value={maxSoc} setValue={setMaxSoc} min={minSoc+1} max={100} step={1} unit="%" color="#22c55e"/>
-                <NumField label="Start SOC" value={startSoc} setValue={setStartSoc} min={minSoc} max={maxSoc} step={1} unit="%" color="#94a3b8"/>
-                <div style={{height:1,background:"#1a274480",margin:"6px 0"}}/>
-                <div style={{padding:"4px 6px",background:"#0d1a2e",borderRadius:3,border:"1px solid #1a2744"}}>
-                  <DR l="Duration" v={duration.toFixed(1)+" hr"} c="#22d3ee"/>
-                  <DR l="Usable Energy" v={usableMWh.toFixed(0)+" MWh"} c="#f59e0b"/>
-                  <DR l="Start Energy" v={((startSoc/100)*battMWh).toFixed(0)+" MWh"} c="#94a3b8"/>
-                  <div style={{height:1,background:"#1a274430",margin:"2px 0"}}/>
-                  <DR l={"Chg "+chgPctHr.toFixed(1)+"%/hr"} v={fullChgHr.toFixed(1)+" hr full"} c="#3b82f6"/>
-                  <DR l={"Dis "+disPctHr.toFixed(1)+"%/hr"} v={fullDisHr.toFixed(1)+" hr empty"} c="#22c55e"/>
-                </div>
-              </div>
-              {/* FORECAST ACCURACY */}
-              <div style={P}>
-                <div style={LB}>FORECAST ACCURACY</div>
-                {[{k:"sup",v:supAcc,set:setSupAcc,l:"Supply",c:"#3b82f6"},{k:"dem",v:demAcc,set:setDemAcc,l:"Demand",c:"#22c55e"},{k:"crd",v:crdAcc,set:setCrdAcc,l:"Crowd",c:"#ef4444"}].map(s=>(
-                  <div key={s.k} style={{marginBottom:6}}>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
-                      <span style={{fontSize:8,color:s.c,fontWeight:600}}>{s.l}</span>
-                      <span style={{fontSize:10,fontWeight:800,color:s.c}}>{s.v}%</span>
-                    </div>
-                    <input type="range" min={0} max={100} value={s.v} onChange={e=>{s.set(+e.target.value);setAccP(null);}} style={{width:"100%",height:4,appearance:"none",WebkitAppearance:"none",background:"#1a2744",borderRadius:2,outline:"none",cursor:"pointer",accentColor:s.c}}/>
-                  </div>))}
-                <div style={{display:"flex",gap:2,flexWrap:"wrap",marginTop:2}}>
-                  {Object.entries(ACC_PRESETS).map(([n,p])=>(
-                    <button key={n} onClick={()=>{setSupAcc(p.sup);setDemAcc(p.dem);setCrdAcc(p.crd);setAccP(n);}} style={{padding:"2px 5px",borderRadius:3,fontSize:7,fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:accP===n?"1px solid #60a5fa":"1px solid #1a2744",background:accP===n?"#3b82f610":"#0d1a2e",color:accP===n?"#60a5fa":"#4a6a8a"}}>{n}</button>))}
-                </div>
-              </div>
-              {/* FLEET SCALE */}
-              <div style={{...P,border:"1px solid #a855f725"}}>
-                <div style={{...LB,color:"#a855f7",marginBottom:4}}>FLEET SCALE</div>
-                <NumField label="Nodes" value={fleetN} setValue={v=>setFleetN(Math.max(1,Math.min(500,Math.round(v))))} min={1} max={500} step={1} unit="units" color="#a855f7"/>
-                {fleetN>1&&<div style={{padding:"4px 6px",background:"#a855f708",borderRadius:3,border:"1px solid #a855f720",marginTop:4}}>
-                  <DR l="Fleet Power" v={(battMW*fleetN)>=1000?((battMW*fleetN)/1000).toFixed(1)+" GW":(battMW*fleetN)+" MW"} c="#a855f7"/>
-                  <DR l="Fleet Capacity" v={(battMWh*fleetN)>=1000?((battMWh*fleetN)/1000).toFixed(1)+" GWh":(battMWh*fleetN)+" MWh"} c="#a855f7"/>
-                  <DR l="Fleet Usable" v={(usableMWh*fleetN)>=1000?((usableMWh*fleetN)/1000).toFixed(1)+" GWh":(usableMWh*fleetN).toFixed(0)+" MWh"} c="#a855f7"/>
-                </div>}
-              </div>
+      {/* ══════════ UNIFIED LAYOUT ══════════ */}
+      <div style={{display:"flex",gap:0,minHeight:0}}>
+
+        {/* ═══ LEFT COLUMN: Live Trading ═══ */}
+        {(mob?mobPanel==="trade":!colL)&&<div style={{width:mob?"100%":"180px",flexShrink:0,display:"flex",flexDirection:"column",gap:6,minWidth:0,overflow:"hidden"}}>
+          {/* Run controls */}
+          <div style={{...P,padding:"6px 8px"}}>
+            <div style={{display:"flex",gap:3,marginBottom:4}}>
+              <button onClick={()=>setRunning(!running)} style={{flex:1,padding:"4px 8px",borderRadius:3,border:"1px solid "+(running?"#ef4444":"#22c55e"),background:(running?"#ef4444":"#22c55e")+"20",color:running?"#ef4444":"#22c55e",fontFamily:"inherit",fontSize:f(9),fontWeight:700,cursor:"pointer"}}>{running?"\u25A0 STOP":"\u25B6 RUN"}</button>
+              <button onClick={reset} style={{padding:"4px 7px",borderRadius:3,border:"1px solid #1a2744",background:"#0d1a2e",color:"#4a6a8a",fontFamily:"inherit",fontSize:f(8),fontWeight:600,cursor:"pointer"}}>RESET</button>
+            </div>
+            <div style={{display:"flex",gap:2}}>
+              {[{l:"1x",v:2000},{l:"2x",v:1000},{l:"5x",v:400}].map(s=>(
+                <button key={s.v} onClick={()=>setSpeed(s.v)} style={{flex:1,padding:"3px 0",borderRadius:3,border:speed===s.v?"1px solid #3b82f6":"1px solid #1a2744",background:speed===s.v?"#3b82f620":"#0d1a2e",color:speed===s.v?"#60a5fa":"#4a6a8a",fontFamily:"inherit",fontSize:f(8),fontWeight:600,cursor:"pointer",textAlign:"center"}}>{s.l}</button>))}
             </div>
           </div>
-        </div>
-      )}
-
-      {/* ══════════ TRADE TAB ══════════ */}
-      {view==="trade"&&(
-        <div style={{display:"grid",gridTemplateColumns:"1fr 170px 240px",gap:8}}>
-          {/* LEFT: metrics + chart + alerts */}
-          <div style={{display:"flex",flexDirection:"column",gap:6,minWidth:0,overflow:"hidden"}}>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4}}>
-              {[
-                {l:"RT Price",v:last?"$"+last.rt:"--",c:"#22d3ee"},
-                {l:"Forecast",v:last?"$"+last.fv:"--",c:"#f59e0b"},
-                {l:"Spread",v:last?(last.sp>0?"+":"")+"$"+last.sp:"--",c:last?(last.sp>0?"#22c55e":"#ef4444"):"#94a3b8"},
-                {l:"SOC",v:soc.toFixed(0)+"%",c:soc>60?"#22c55e":soc>30?"#f59e0b":"#ef4444"},
-                {l:"Your P&L",v:(uPnl>=0?"+":"")+"$"+uPnl.toFixed(0),c:uPnl>=0?"#22c55e":"#ef4444"},
-                {l:"System P&L",v:(sPnl>=0?"+":"")+"$"+sPnl.toFixed(0),c:sPnl>=0?"#22c55e":"#ef4444"},
-                {l:"Sim Time",v:last?DAYS[simD]+" "+last.time:"Mon 00:00",c:"#60a5fa"},
-              ].map((m,i)=>(
-                <div key={i} style={{...P,textAlign:"center",padding:"5px 2px"}}>
-                  <div style={{fontSize:12,fontWeight:800,color:m.c,lineHeight:1.2}}>{m.v}</div>
-                  <div style={{fontSize:6,color:"#4a6a8a",fontWeight:600,letterSpacing:".06em",textTransform:"uppercase"}}>{m.l}</div>
-                </div>))}
+          {/* Active mode + override */}
+          <div style={{...P,background:(MC[eMode]||"#94a3b8")+"08",borderColor:(MC[eMode]||"#94a3b8")+"30"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+              <div style={LB}>ACTIVE MODE</div>
+              {manual&&<div style={{fontSize:f(7),fontWeight:700,padding:"1px 4px",borderRadius:2,background:"#f59e0b15",border:"1px solid #f59e0b30",color:"#f59e0b"}}>OVERRIDE</div>}
             </div>
-            <div style={{...P,flex:1}}>
-              <div style={LB}>RT PRICE vs FORECAST</div>
-              {rtC?(<svg width="100%" viewBox={"0 0 "+rtC.w+" "+rtC.h} style={{display:"block"}}>
-                {rtC.yT.map(t=><g key={t.v}><line x1={rtC.pl} y1={t.py} x2={rtC.w-rtC.pr} y2={t.py} stroke="#1a2744" strokeWidth=".5"/><text x={rtC.pl-3} y={t.py+3} textAnchor="end" fill="#3a5a7a" fontSize="7" fontFamily="inherit">${t.v}</text></g>)}
-                <path d={rtC.fL} fill="none" stroke="#f59e0b" strokeWidth="1" strokeDasharray="3,2" opacity=".6"/>
-                {rtC.sg.map((s,i)=><path key={i} d={s.d} fill="none" stroke={s.c} strokeWidth="1.5" strokeLinecap="round"/>)}
-              </svg>):<div style={{height:90,display:"flex",alignItems:"center",justifyContent:"center",color:"#2a4a6a",fontSize:10}}>Press RUN to start simulation</div>}
+            <div style={{fontSize:f(14),fontWeight:900,color:MC[eMode]||"#94a3b8",lineHeight:1.1,marginBottom:2}}>{eMode}</div>
+            <div style={{fontSize:f(7),color:"#5a7a9a",marginBottom:8}}>
+              {eMode==="CHARGE"?"Buying "+chgMW+"MW":eMode==="DISCHARGE"?"Selling "+disMW+"MW":"Idle"}{last?" @ $"+last.rt+"/MWh":""}
             </div>
-            <div style={{...P,maxHeight:130,overflowY:"auto"}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                <div style={LB}>ALERTS</div>
-                {alerts.length>0&&<span style={{fontSize:6,padding:"1px 4px",borderRadius:8,background:"#ef444420",color:"#ef4444",fontWeight:700}}>{alerts.length}</span>}
-              </div>
-              {alerts.length===0?<div style={{color:"#2a4a6a",fontSize:9,textAlign:"center",padding:"8px 0"}}>No override events yet</div>:(
-                <div style={{display:"flex",flexDirection:"column",gap:0}}>
-                  {alerts.slice(0,10).map((a,idx)=>(<div key={a.id} style={{display:"grid",gridTemplateColumns:"52px 44px 1fr",gap:4,padding:"3px 4px",borderBottom:"1px solid #1a274440",background:idx===0?a.tc+"06":"transparent"}}>
-                    <span style={{fontSize:7,color:"#3a5a7a",fontFamily:"inherit"}}>{a.time}</span>
-                    <span style={{fontSize:7,fontWeight:700,color:a.tc}}>{a.tag}</span>
-                    <span style={{fontSize:7,color:"#5a7a9a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.msg}</span>
-                  </div>))}
-                </div>)}
+            <div style={{borderTop:"1px solid #1a2744",paddingTop:6}}>
+              <div style={{fontSize:f(7),fontWeight:600,color:"#4a6a8a",letterSpacing:".08em",marginBottom:4}}>OVERRIDE</div>
+              <OvrBtns/>
             </div>
           </div>
-
-          {/* MIDDLE: mode + controls */}
-          <div style={{display:"flex",flexDirection:"column",gap:6,minWidth:0,overflow:"hidden"}}>
-            {/* Active mode + override combined */}
-            <div style={{...P,background:(MC[eMode]||"#94a3b8")+"08",borderColor:(MC[eMode]||"#94a3b8")+"30"}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                <div style={LB}>ACTIVE MODE</div>
-                {manual&&<div style={{fontSize:6,fontWeight:700,padding:"1px 4px",borderRadius:2,background:"#f59e0b15",border:"1px solid #f59e0b30",color:"#f59e0b"}}>OVERRIDE</div>}
-              </div>
-              <div style={{fontSize:18,fontWeight:900,color:MC[eMode]||"#94a3b8",lineHeight:1.1,marginBottom:2}}>{eMode}</div>
-              <div style={{fontSize:7,color:"#5a7a9a",marginBottom:8}}>
-                {eMode==="CHARGE"?"Buying "+chgMW+"MW":eMode==="DISCHARGE"?"Selling "+disMW+"MW":"Idle"}{last?" @ $"+last.rt+"/MWh":""}
-              </div>
-              <div style={{borderTop:"1px solid #1a2744",paddingTop:6}}>
-                <div style={{fontSize:7,fontWeight:600,color:"#4a6a8a",letterSpacing:".08em",marginBottom:4}}>OVERRIDE</div>
-                <OvrBtns/>
-              </div>
+          {/* System rec */}
+          <div style={{...P,background:rec?(MC[rec.mode]||"#94a3b8")+"08":"#0b1628"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
+              <div style={LB}>SYSTEM REC</div>
+              {rec&&rec.tag&&<div style={{fontSize:f(7),fontWeight:700,padding:"1px 4px",borderRadius:2,background:(rec.tc||"#f59e0b")+"20",color:rec.tc||"#f59e0b"}}>{rec.tag}</div>}
             </div>
-            {/* SOC */}
-            <div style={P}>
-              <div style={LB}>SOC</div>
-              <div style={{position:"relative",height:16,background:"#0d1a2e",borderRadius:3,overflow:"hidden",border:"1px solid #1a2744"}}>
-                <div style={{position:"absolute",left:minSoc+"%",top:0,width:1,height:"100%",background:"#ef444460",zIndex:1}}/>
-                <div style={{position:"absolute",left:maxSoc+"%",top:0,width:1,height:"100%",background:"#22c55e60",zIndex:1}}/>
-                <div style={{position:"absolute",left:0,top:0,height:"100%",width:soc+"%",borderRadius:3,background:(soc>=maxSoc-2?"#22c55e":soc>60?"#22c55e":soc>30?"#f59e0b":"#ef4444")+"50",transition:"width .4s"}}/>
-                <div style={{position:"absolute",width:"100%",textAlign:"center",fontSize:8,fontWeight:800,lineHeight:"16px",color:soc>=maxSoc-2?"#22c55e":soc>60?"#22c55e":soc>30?"#f59e0b":"#ef4444",zIndex:2}}>{soc.toFixed(0)}%</div>
-              </div>
-              <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}>
-                <span style={{fontSize:6,color:"#ef4444"}}>{minSoc}% min</span>
-                <span style={{fontSize:6,color:"#3a5a7a"}}>{((soc/100)*battMWh).toFixed(0)} / {battMWh} MWh</span>
-                <span style={{fontSize:6,color:"#22c55e"}}>{maxSoc}% max</span>
-              </div>
+            {rec?(<div>
+              <div style={{fontSize:f(14),fontWeight:900,color:MC[rec.mode],marginBottom:2}}>{rec.mode}</div>
+              <div style={{height:3,background:"#0d1a2e",borderRadius:2,marginBottom:4,overflow:"hidden"}}><div style={{height:"100%",width:rec.conf+"%",borderRadius:2,background:MC[rec.mode],transition:"width .3s"}}/></div>
+              <div style={{fontSize:f(7),color:"#5a7a9a",lineHeight:1.5}}>{rec.reason}</div>
+              {rec.ovr&&!manual&&<div style={{marginTop:3,padding:"2px 4px",background:"#f59e0b10",borderRadius:2,border:"1px solid #f59e0b20",fontSize:f(7),color:"#f59e0b"}}>Overriding schedule</div>}
+            </div>):<div style={{color:"#2a4a6a",fontSize:f(9)}}>Press RUN to start</div>}
+          </div>
+          {/* P&L */}
+          <div style={P}>
+            <div style={LB}>P&L: YOU vs SYSTEM{fleetN>1?" (per unit)":""}</div>
+            <div style={{display:"flex",justifyContent:"space-around",alignItems:"center"}}>
+              <div style={{textAlign:"center"}}><div style={{fontSize:f(12),fontWeight:800,color:uPnl>=0?"#22c55e":"#ef4444"}}>${uPnl.toFixed(0)}</div><div style={{fontSize:f(7),color:"#4a6a8a",fontWeight:600,textTransform:"uppercase"}}>YOU</div></div>
+              <div style={{width:1,height:24,background:"#1a2744"}}/>
+              <div style={{textAlign:"center"}}><div style={{fontSize:f(12),fontWeight:800,color:sPnl>=0?"#22c55e":"#ef4444"}}>${sPnl.toFixed(0)}</div><div style={{fontSize:f(7),color:"#4a6a8a",fontWeight:600,textTransform:"uppercase"}}>SYSTEM</div></div>
             </div>
-            <div style={P}>
-              <div style={LB}>RISK TOLERANCE</div>
-              <div style={{display:"flex",gap:2}}>
-                {[{v:1,l:"1\u03C3",c:"#ef4444"},{v:2,l:"2\u03C3",c:"#f59e0b"},{v:3,l:"3\u03C3",c:"#22c55e"}].map(o=>(
-                  <button key={o.v} onClick={()=>setSigTh(o.v)} style={{flex:1,padding:"4px",borderRadius:3,cursor:"pointer",fontFamily:"inherit",textAlign:"center",border:sigTh===o.v?"2px solid "+o.c:"1px solid #1a2744",background:sigTh===o.v?o.c+"15":"#0d1a2e"}}>
-                    <div style={{fontSize:12,fontWeight:800,color:sigTh===o.v?o.c:"#3a5a7a"}}>{o.l}</div>
-                  </button>))}
-              </div>
-            </div>
-            <div style={P}>
-              <div style={LB}>P&L: YOU vs SYSTEM{fleetN>1?" (per unit)":""}</div>
+            {ticks.length>10&&<div style={{textAlign:"center",fontSize:f(8),marginTop:2,color:uPnl>=sPnl?"#22c55e":"#f59e0b",fontWeight:600}}>{uPnl>=sPnl?"You +$"+(uPnl-sPnl).toFixed(0):"System +$"+(sPnl-uPnl).toFixed(0)}</div>}
+            {fleetN>1&&<div style={{marginTop:4,paddingTop:4,borderTop:"1px solid #1a2744"}}>
+              <div style={{fontSize:f(7),fontWeight:700,color:"#a855f7",letterSpacing:".06em",textAlign:"center",marginBottom:2}}>FLEET ({fleetN} UNITS)</div>
               <div style={{display:"flex",justifyContent:"space-around",alignItems:"center"}}>
-                <div style={{textAlign:"center"}}><div style={{fontSize:14,fontWeight:800,color:uPnl>=0?"#22c55e":"#ef4444"}}>${uPnl.toFixed(0)}</div><div style={{fontSize:6,color:"#4a6a8a",fontWeight:600,textTransform:"uppercase"}}>YOU</div></div>
-                <div style={{width:1,height:24,background:"#1a2744"}}/>
-                <div style={{textAlign:"center"}}><div style={{fontSize:14,fontWeight:800,color:sPnl>=0?"#22c55e":"#ef4444"}}>${sPnl.toFixed(0)}</div><div style={{fontSize:6,color:"#4a6a8a",fontWeight:600,textTransform:"uppercase"}}>SYSTEM</div></div>
+                <div style={{textAlign:"center"}}><div style={{fontSize:f(12),fontWeight:800,color:uPnl>=0?"#22c55e":"#ef4444"}}>{fmtDol(uPnl*fleetN)}</div><div style={{fontSize:f(7),color:"#4a6a8a",fontWeight:600}}>YOU</div></div>
+                <div style={{width:1,height:20,background:"#1a2744"}}/>
+                <div style={{textAlign:"center"}}><div style={{fontSize:f(12),fontWeight:800,color:sPnl>=0?"#22c55e":"#ef4444"}}>{fmtDol(sPnl*fleetN)}</div><div style={{fontSize:f(7),color:"#4a6a8a",fontWeight:600}}>SYSTEM</div></div>
               </div>
-              {ticks.length>10&&<div style={{textAlign:"center",fontSize:8,marginTop:2,color:uPnl>=sPnl?"#22c55e":"#f59e0b",fontWeight:600}}>{uPnl>=sPnl?"You +$"+(uPnl-sPnl).toFixed(0):"System +$"+(sPnl-uPnl).toFixed(0)}</div>}
-              {fleetN>1&&<div style={{marginTop:4,paddingTop:4,borderTop:"1px solid #1a2744"}}>
-                <div style={{fontSize:7,fontWeight:700,color:"#a855f7",letterSpacing:".06em",textAlign:"center",marginBottom:2}}>FLEET ({fleetN} UNITS)</div>
-                <div style={{display:"flex",justifyContent:"space-around",alignItems:"center"}}>
-                  <div style={{textAlign:"center"}}><div style={{fontSize:12,fontWeight:800,color:uPnl>=0?"#22c55e":"#ef4444"}}>{fmtDol(uPnl*fleetN)}</div><div style={{fontSize:6,color:"#4a6a8a",fontWeight:600}}>YOU</div></div>
-                  <div style={{width:1,height:20,background:"#1a2744"}}/>
-                  <div style={{textAlign:"center"}}><div style={{fontSize:12,fontWeight:800,color:sPnl>=0?"#22c55e":"#ef4444"}}>{fmtDol(sPnl*fleetN)}</div><div style={{fontSize:6,color:"#4a6a8a",fontWeight:600}}>SYSTEM</div></div>
-                </div>
-              </div>}
+            </div>}
+          </div>
+          {/* Risk tolerance */}
+          <div style={P}>
+            <div style={LB}>RISK TOLERANCE</div>
+            <div style={{display:"flex",gap:2}}>
+              {[{v:1,l:"1\u03C3",c:"#ef4444"},{v:2,l:"2\u03C3",c:"#f59e0b"},{v:3,l:"3\u03C3",c:"#22c55e"}].map(o=>(
+                <button key={o.v} onClick={()=>setSigTh(o.v)} style={{flex:1,padding:"4px",borderRadius:3,cursor:"pointer",fontFamily:"inherit",textAlign:"center",border:sigTh===o.v?"2px solid "+o.c:"1px solid #1a2744",background:sigTh===o.v?o.c+"15":"#0d1a2e"}}>
+                  <div style={{fontSize:f(12),fontWeight:800,color:sigTh===o.v?o.c:"#3a5a7a"}}>{o.l}</div>
+                </button>))}
             </div>
           </div>
-
-          {/* RIGHT: rec + editable schedule + trade log */}
-          <div style={{display:"flex",flexDirection:"column",gap:6,minWidth:0,overflow:"hidden"}}>
-            <div style={{...P,background:rec?(MC[rec.mode]||"#94a3b8")+"08":"#0b1628"}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
-                <div style={LB}>SYSTEM REC</div>
-                {rec&&rec.tag&&<div style={{fontSize:6,fontWeight:700,padding:"1px 4px",borderRadius:2,background:(rec.tc||"#f59e0b")+"20",color:rec.tc||"#f59e0b"}}>{rec.tag}</div>}
-              </div>
-              {rec?(<div>
-                <div style={{fontSize:18,fontWeight:900,color:MC[rec.mode],marginBottom:2}}>{rec.mode}</div>
-                <div style={{height:3,background:"#0d1a2e",borderRadius:2,marginBottom:4,overflow:"hidden"}}><div style={{height:"100%",width:rec.conf+"%",borderRadius:2,background:MC[rec.mode],transition:"width .3s"}}/></div>
-                <div style={{fontSize:8,color:"#5a7a9a",lineHeight:1.5}}>{rec.reason}</div>
-                {rec.ovr&&!manual&&<div style={{marginTop:3,padding:"2px 4px",background:"#f59e0b10",borderRadius:2,border:"1px solid #f59e0b20",fontSize:7,color:"#f59e0b"}}>Overriding schedule</div>}
-              </div>):<div style={{color:"#2a4a6a",fontSize:9}}>Press RUN to start</div>}
+          {/* Revenue */}
+          <div style={P}>
+            <div onClick={()=>setProfitOpen(!profitOpen)} style={{display:"flex",alignItems:"center",gap:4,cursor:"pointer",marginBottom:profitOpen?4:0}}>
+              <span style={{fontSize:f(8),color:"#4a6a8a",fontWeight:700,transition:"transform .15s",display:"inline-block",transform:profitOpen?"rotate(90deg)":"rotate(0deg)"}}>{"\u25B6"}</span>
+              <div style={{...LB,marginBottom:0}}>PROFIT BENCHMARKS</div>
+              {!profitOpen&&<span style={{fontSize:f(7),fontWeight:700,color:"#22d3ee",marginLeft:"auto"}}>{fmtDol(revYours)}/d</span>}
             </div>
-            {/* Compact editable schedule in trade view */}
-            <div style={{...P,overflow:"hidden"}}>
-              <div style={{marginBottom:4}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
-                  <div style={LB}>SCHEDULE</div>
-                  {schP&&<div style={{fontSize:6,fontWeight:600,padding:"1px 4px",borderRadius:2,background:schP==="Optimized"?"#22c55e15":schP==="RT Opt"?"#f59e0b15":"#94a3b815",border:"1px solid "+(schP==="Optimized"?"#22c55e30":schP==="RT Opt"?"#f59e0b30":"#94a3b830"),color:schP==="Optimized"?"#22c55e":schP==="RT Opt"?"#f59e0b":"#94a3b8"}}>{schP}</div>}
-                </div>
-                <SchBtns compact/>
-              </div>
-              <SchGrid compact={true}/>
-            </div>
-            {/* Trade log */}
-            <div style={{...P,flex:1,maxHeight:120,overflowY:"auto"}}>
-              <div style={LB}>TRADE LOG</div>
-              {tlog.length===0?<div style={{color:"#2a4a6a",fontSize:8}}>Mode changes logged here.</div>:(
-                <div style={{display:"flex",flexDirection:"column",gap:1}}>
-                  {tlog.map(t=>(<div key={t.id} style={{display:"flex",gap:3,padding:"2px 3px",borderLeft:"2px solid "+(MC[t.mode]||"#94a3b8"),fontSize:8}}>
-                    <span style={{color:"#4a6a8a",width:46,flexShrink:0}}>{t.time}</span>
-                    <span style={{color:MC[t.mode],fontWeight:700,width:50,flexShrink:0}}>{t.mode}</span>
-                    <span style={{color:"#4a6a8a",flex:1}}>${t.rt} | {t.soc}%</span>
-                    {t.ovr&&<span style={{fontSize:6,color:"#f59e0b",fontWeight:700}}>OVR</span>}
+            {profitOpen&&<div>
+            {[{l:"PER UNIT /day",items:[{n:"Naive",v:revNaive,c:"#94a3b8"},{n:"Yours",v:revYours,c:"#22d3ee"},{n:"Perfect",v:revPerf,c:"#22c55e"}]},
+              ...(fleetN>1?[{l:"FLEET /day",items:[{n:"Naive",v:revNaive*fleetN,c:"#94a3b8"},{n:"Yours",v:revYours*fleetN,c:"#22d3ee"},{n:"Perfect",v:revPerf*fleetN,c:"#22c55e"}]}]:[]),
+              {l:(fleetN>1?"FLEET":"ANNUAL")+" /year",items:[{n:"Naive",v:revNaive*fleetN*365,c:"#94a3b8"},{n:"Yours",v:revYours*fleetN*365,c:"#22d3ee"},{n:"Perfect",v:revPerf*fleetN*365,c:"#22c55e"}]}
+            ].map((row,ri)=>(
+              <div key={ri} style={{marginBottom:4,...(ri>0?{paddingTop:4,borderTop:"1px solid #1a2744"}:{})}}>
+                <div style={{fontSize:f(7),fontWeight:700,color:ri>0&&fleetN>1?"#a855f7":"#4a6a8a",letterSpacing:".06em",marginBottom:2}}>{row.l}</div>
+                {row.items.map(r=>(
+                  <div key={r.n} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"1px 0"}}>
+                    <span style={{fontSize:f(7),color:"#4a6a8a"}}>{r.n}</span>
+                    <span style={{fontSize:f(8),fontWeight:700,color:r.c}}>{fmtDol(r.v)}</span>
                   </div>))}
-                </div>)}
+              </div>))}
+            {(()=>{const uplift=(revYours-revNaive)*fleetN*365,ceiling=(revPerf-revNaive)*fleetN*365,pct=ceiling>0?Math.min(100,Math.max(0,(uplift/ceiling)*100)):0;
+              return(<div style={{paddingTop:4,borderTop:"1px solid #1a2744"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
+                  <span style={{fontSize:f(7),color:"#4a6a8a",fontWeight:600}}>VALUE CAPTURE</span>
+                  <span style={{fontSize:f(7),fontWeight:700,color:uplift>=0?"#22c55e":"#ef4444"}}>{uplift>=0?"+":""}{fmtDol(uplift)}/yr</span>
+                </div>
+                <div style={{height:3,background:"#0d1a2e",borderRadius:2,overflow:"hidden",position:"relative"}}>
+                  <div style={{position:"absolute",height:"100%",width:pct+"%",borderRadius:2,background:uplift>=0?"linear-gradient(90deg,#22c55e80,#22c55e)":"#ef444480",transition:"width .3s"}}/>
+                </div>
+              </div>);
+            })()}
+            </div>}
+          </div>
+          {/* Alerts */}
+          <div style={{...P,maxHeight:110,overflowY:"auto"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+              <div style={LB}>ALERTS</div>
+              {alerts.length>0&&<span style={{fontSize:f(7),padding:"1px 4px",borderRadius:8,background:"#ef444420",color:"#ef4444",fontWeight:700}}>{alerts.length}</span>}
+            </div>
+            {alerts.length===0?<div style={{color:"#2a4a6a",fontSize:f(9),textAlign:"center",padding:"4px 0"}}>No events yet</div>:(
+              <div style={{display:"flex",flexDirection:"column",gap:0}}>
+                {alerts.slice(0,8).map((a,idx)=>(<div key={a.id} style={{display:"flex",gap:3,padding:"2px 3px",borderBottom:"1px solid #1a274440",background:idx===0?a.tc+"06":"transparent"}}>
+                  <span style={{fontSize:f(7),fontWeight:700,color:a.tc,flexShrink:0}}>{a.tag}</span>
+                  <span style={{fontSize:f(7),color:"#5a7a9a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.msg}</span>
+                </div>))}
+              </div>)}
+          </div>
+          {/* Trade log */}
+          <div style={{...P,maxHeight:100,overflowY:"auto"}}>
+            <div style={LB}>TRADE LOG</div>
+            {tlog.length===0?<div style={{color:"#2a4a6a",fontSize:f(8)}}>Mode changes logged here.</div>:(
+              <div style={{display:"flex",flexDirection:"column",gap:1}}>
+                {tlog.map(t=>(<div key={t.id} style={{display:"flex",gap:3,padding:"2px 3px",borderLeft:"2px solid "+(MC[t.mode]||"#94a3b8"),fontSize:f(7)}}>
+                  <span style={{color:"#4a6a8a",width:46,flexShrink:0}}>{t.time}</span>
+                  <span style={{color:MC[t.mode],fontWeight:700,width:50,flexShrink:0}}>{t.mode}</span>
+                  <span style={{color:"#4a6a8a",flex:1}}>${t.rt} | {t.soc}%</span>
+                  {t.ovr&&<span style={{fontSize:f(7),color:"#f59e0b",fontWeight:700}}>OVR</span>}
+                </div>))}
+              </div>)}
+          </div>
+        </div>}
+
+        {/* Left separator bar */}
+        {!mob&&<div onClick={()=>setColL(!colL)} style={{width:colL?12:8,flexShrink:0,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",background:colL?"#22d3ee08":"transparent",borderRadius:3,transition:"all .15s",position:"relative"}} onMouseEnter={e=>e.currentTarget.style.background="#22d3ee10"} onMouseLeave={e=>e.currentTarget.style.background=colL?"#22d3ee08":"transparent"}>
+          <div style={{width:2,height:"60%",minHeight:40,borderRadius:1,background:"#1a2744",transition:"background .15s"}}/>
+          <div style={{position:"absolute",fontSize:8,fontWeight:700,color:"#3a5a7a",writingMode:"vertical-rl",textOrientation:"mixed",letterSpacing:".1em",opacity:.6}}>{colL?"\u25B6":"\u25C0"}</div>
+        </div>}
+
+        {/* ═══ CENTER COLUMN: Charts + Schedule ═══ */}
+        {(mob?mobPanel==="center":true)&&<div style={{flex:1,display:"flex",flexDirection:"column",gap:6,minWidth:0,overflow:"hidden"}}>
+          {/* Mobile compact run bar */}
+          {mob&&<div style={{...P,display:"flex",alignItems:"center",gap:6,padding:"6px 10px"}}>
+            <button onClick={()=>setRunning(!running)} style={{padding:"5px 12px",borderRadius:3,border:"1px solid "+(running?"#ef4444":"#22c55e"),background:(running?"#ef4444":"#22c55e")+"20",color:running?"#ef4444":"#22c55e",fontFamily:"inherit",fontSize:f(9),fontWeight:700,cursor:"pointer"}}>{running?"\u25A0 STOP":"\u25B6 RUN"}</button>
+            <button onClick={reset} style={{padding:"5px 8px",borderRadius:3,border:"1px solid #1a2744",background:"#0d1a2e",color:"#4a6a8a",fontFamily:"inherit",fontSize:f(8),fontWeight:600,cursor:"pointer"}}>RESET</button>
+            <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:8}}>
+              <div style={{textAlign:"center"}}><div style={{fontSize:f(9),fontWeight:800,color:MC[eMode]||"#94a3b8",lineHeight:1}}>{eMode}</div><div style={{fontSize:f(7),color:"#4a6a8a"}}>MODE</div></div>
+              <div style={{textAlign:"center"}}><div style={{fontSize:f(9),fontWeight:800,color:soc>60?"#22c55e":soc>30?"#f59e0b":"#ef4444",lineHeight:1}}>{soc.toFixed(0)}%</div><div style={{fontSize:f(7),color:"#4a6a8a"}}>SOC</div></div>
+              <div style={{textAlign:"center"}}><div style={{fontSize:f(9),fontWeight:800,color:uPnl>=0?"#22c55e":"#ef4444",lineHeight:1}}>${uPnl.toFixed(0)}</div><div style={{fontSize:f(7),color:"#4a6a8a"}}>P&L</div></div>
+            </div>
+          </div>}
+          {/* Day tabs */}
+          <div style={{display:"flex",gap:3}}>
+            {DAYS.map((d,i)=>(
+              <button key={d} onClick={()=>setSelDay(d)} style={{flex:1,padding:mob?"6px 2px":"4px 2px",borderRadius:4,cursor:"pointer",fontFamily:"inherit",textAlign:"center",fontSize:f(9),fontWeight:700,border:selDay===d?"1px solid #22d3ee":"1px solid #1a2744",background:selDay===d?"#22d3ee15":"#0d1a2e",color:selDay===d?"#22d3ee":(running&&i===simD?"#f59e0b":"#4a6a8a")}}>
+                <div>{d}</div><div style={{fontSize:f(7),fontWeight:400,color:"#3a5a7a"}}>{WEEK[d].date}</div>
+              </button>))}
+          </div>
+          {/* Context row */}
+          <div style={{display:"flex",gap:8,padding:mob?"6px 10px":"4px 8px",...P,flexWrap:"wrap"}}>
+            {[{l:"DA Avg",v:"$"+(dayD.d.reduce((a,r)=>a+r[1],0)/24).toFixed(0),c:"#94a3b8"},{l:"RT Avg",v:"$"+(dayD.d.reduce((a,r)=>a+r[2],0)/24).toFixed(0),c:"#22d3ee"},{l:"Crowd",v:crowdPct.toFixed(0)+"%",c:"#ef4444"},{l:"MAE",v:"$"+mae.toFixed(1),c:"#f59e0b"},{l:"",v:dayD.note,c:"#5a7a9a",w:true}].map((m,i)=>(
+              <div key={i} style={{display:"flex",gap:3,alignItems:"center",flex:m.w?1:0,whiteSpace:"nowrap"}}>
+                {m.l&&<span style={{fontSize:f(7),color:"#3a5a7a",fontWeight:600}}>{m.l}</span>}
+                <span style={{fontSize:f(9),fontWeight:700,color:m.c}}>{m.v}</span>
+              </div>))}
+          </div>
+          {/* Price chart */}
+          <div style={P}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
+              <div style={LB}>{dayD.label} PRICE CURVES</div>
+              <div style={{display:"flex",gap:10}}>
+                {[{l:"DAM",c:"#94a3b8",d:true},{l:"Forecast",c:"#f59e0b"},{l:"RTM",c:"#22d3ee"}].map(x=>(
+                  <div key={x.l} style={{display:"flex",alignItems:"center",gap:3}}>
+                    <svg width="12" height="2"><line x1="0" y1="1" x2="12" y2="1" stroke={x.c} strokeWidth="1.5" strokeDasharray={x.d?"3,2":"none"}/></svg>
+                    <span style={{fontSize:f(7),color:"#4a6a8a"}}>{x.l}</span></div>))}
+              </div>
+            </div>
+            <svg width="100%" viewBox={"0 0 "+CW+" "+CH} style={{display:"block"}}
+              onMouseMove={e=>{const r=e.currentTarget.getBoundingClientRect();const mx=(e.clientX-r.left)/r.width*CW;const h=Math.round(((mx-PD.l)/pW)*23);setHovH(h>=0&&h<=23?h:null);}}
+              onMouseLeave={()=>setHovH(null)}>
+              {cp.yT.map(t=><g key={t.v}><line x1={PD.l} y1={t.py} x2={CW-PD.r} y2={t.py} stroke="#1a2744" strokeWidth=".5"/><text x={PD.l-3} y={t.py+3} textAnchor="end" fill="#3a5a7a" fontSize="7" fontFamily="inherit">${t.v}</text></g>)}
+              {[0,4,8,12,16,20].map(h=><text key={h} x={cp.x(h)} y={CH-3} textAnchor="middle" fill="#3a5a7a" fontSize="7" fontFamily="inherit">HE{h}</text>)}
+              {fcs.map((f,i)=>{const m=cp.sch[i];return m!=="H"&&<rect key={i} x={cp.x(i)-pW/48} y={PD.t} width={pW/24} height={pH} fill={MC[m]} opacity=".08"/>;})}
+              {cp.gap.map((g,i)=>i<23&&<rect key={i} x={g.x} y={g.u} width={pW/24} height={Math.max(1,g.lo-g.u)} fill={g.f} opacity=".06"/>)}
+              <path d={cp.dP} fill="none" stroke="#94a3b8" strokeWidth="1" strokeDasharray="4,3" opacity=".5"/>
+              <path d={cp.fP} fill="none" stroke="#f59e0b" strokeWidth="1.5"/>
+              <path d={cp.rP} fill="none" stroke="#22d3ee" strokeWidth="1.5"/>
+              {hovH!==null&&(running?hovH!==simH:true)&&(()=>{const fc=fcs[hovH],hx=cp.x(hovH);return(<g>
+                <line x1={hx} y1={PD.t} x2={hx} y2={PD.t+pH} stroke="#ffffff20" strokeWidth="1"/>
+                <circle cx={hx} cy={cp.y(fc.dam)} r="2.5" fill="#94a3b8"/><circle cx={hx} cy={cp.y(fc.fc)} r="2.5" fill="#f59e0b"/><circle cx={hx} cy={cp.y(fc.rtm)} r="2.5" fill="#22d3ee"/>
+                <text x={hx+4} y={PD.t+10} fill="#94a3b8" fontSize="7" fontFamily="inherit">DA ${fc.dam}</text>
+                <text x={hx+4} y={PD.t+20} fill="#f59e0b" fontSize="7" fontFamily="inherit">FC ${fc.fc.toFixed(0)}</text>
+                <text x={hx+4} y={PD.t+30} fill="#22d3ee" fontSize="7" fontFamily="inherit">RT ${fc.rtm}</text>
+              </g>);})()}
+              {/* Sim playhead */}
+              {(running||ticks.length>0)&&selDay===DAYS[simD]&&(()=>{
+                const simPos=simH+simM/60,px=cp.x(simPos),rtVal=last?last.rt:null,fcH=fcs[simH];
+                const rtY=rtVal!==null?cp.y(rtVal):0;
+                const flipLabel=px>CW*0.7;
+                return(<g>
+                  <rect x={PD.l} y={PD.t} width={Math.max(0,px-PD.l)} height={pH} fill="#22d3ee" opacity=".03"/>
+                  <line x1={px} y1={PD.t-2} x2={px} y2={PD.t+pH+2} stroke="#22d3ee" strokeWidth="1.5" opacity=".7"/>
+                  <line x1={px} y1={PD.t-2} x2={px} y2={PD.t+pH+2} stroke="#22d3ee" strokeWidth="4" opacity=".1"/>
+                  <rect x={px-(flipLabel?36:0)} y={PD.t-12} width={36} height={11} rx="2" fill="#0b1628" stroke="#22d3ee" strokeWidth=".5" opacity=".9"/>
+                  <text x={px-(flipLabel?36:0)+18} y={PD.t-3.5} textAnchor="middle" fill="#22d3ee" fontSize="7" fontWeight="700" fontFamily="inherit">{String(simH).padStart(2,"0")}:{String(simM).padStart(2,"0")}</text>
+                  {fcH&&<><circle cx={cp.x(simH)} cy={cp.y(fcH.dam)} r="2" fill="#94a3b8" opacity=".5"/><circle cx={cp.x(simH)} cy={cp.y(fcH.fc)} r="2" fill="#f59e0b" opacity=".5"/><circle cx={cp.x(simH)} cy={cp.y(fcH.rtm)} r="2" fill="#22d3ee" opacity=".5"/></>}
+                  {rtVal!==null&&<><circle cx={px} cy={rtY} r="6" fill="#22d3ee" opacity=".15"/><circle cx={px} cy={rtY} r="3.5" fill="#22d3ee" opacity=".3"/><circle cx={px} cy={rtY} r="2" fill="#fff" stroke="#22d3ee" strokeWidth="1"/>
+                    <rect x={flipLabel?px-52:px+6} y={rtY-6} width={46} height={13} rx="2" fill="#0b1628" stroke="#22d3ee40" strokeWidth=".5"/>
+                    <text x={flipLabel?px-29:px+29} y={rtY+3} textAnchor="middle" fill="#22d3ee" fontSize="8" fontWeight="800" fontFamily="inherit">RT ${rtVal.toFixed(0)}</text>
+                  </>}
+                  {rec&&<><rect x={px-(flipLabel?32:0)} y={PD.t+pH+3} width={32} height={10} rx="2" fill={(MC[eMode]||"#94a3b8")+"20"} stroke={(MC[eMode]||"#94a3b8")+"40"} strokeWidth=".5"/>
+                    <text x={px-(flipLabel?32:0)+16} y={PD.t+pH+10.5} textAnchor="middle" fill={MC[eMode]||"#94a3b8"} fontSize="6" fontWeight="700" fontFamily="inherit">{eMode==="CHARGE"?"CHG":eMode==="DISCHARGE"?"DIS":"HLD"}</text>
+                  </>}
+                </g>);
+              })()}
+            </svg>
+          </div>
+          {/* Schedule grid */}
+          <div style={P}>
+            <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:3}}>
+              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                <div style={LB}>CHARGE / DISCHARGE SCHEDULE</div>
+                {clipN>0&&<div style={{fontSize:f(7),fontWeight:700,padding:"1px 5px",borderRadius:2,background:"#f59e0b15",border:"1px solid #f59e0b30",color:"#f59e0b"}}>{clipN} partial</div>}
+              </div>
+              <SchBtns/>
+            </div>
+            <SchGrid compact={false}/>
+            <div style={{fontSize:f(7),color:"#3a5a7a",marginTop:3}}>
+              Click: <span style={{color:"#3b82f6"}}>CHG</span> {"\u2192"} <span style={{color:"#22c55e"}}>DIS</span> {"\u2192"} HOLD. Drag to paint.
+              {clipN>0&&<span style={{color:"#f59e0b"}}> {clipN}hr partial: SOC near {minSoc}% or {maxSoc}% limit, battery charges/discharges at reduced rate.</span>}
             </div>
           </div>
-        </div>
-      )}
+        </div>}
+
+        {/* Right separator bar */}
+        {!mob&&<div onClick={()=>setColR(!colR)} style={{width:colR?12:8,flexShrink:0,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",background:colR?"#22d3ee08":"transparent",borderRadius:3,transition:"all .15s",position:"relative"}} onMouseEnter={e=>e.currentTarget.style.background="#22d3ee10"} onMouseLeave={e=>e.currentTarget.style.background=colR?"#22d3ee08":"transparent"}>
+          <div style={{width:2,height:"60%",minHeight:40,borderRadius:1,background:"#1a2744",transition:"background .15s"}}/>
+          <div style={{position:"absolute",fontSize:8,fontWeight:700,color:"#3a5a7a",writingMode:"vertical-rl",textOrientation:"mixed",letterSpacing:".1em",opacity:.6}}>{colR?"\u25C0":"\u25B6"}</div>
+        </div>}
+
+        {/* ═══ RIGHT COLUMN: Configuration (collapsible) ═══ */}
+        {(mob?mobPanel==="config":!colR)&&<div style={{width:mob?"100%":"220px",flexShrink:0,display:"flex",flexDirection:"column",gap:6}}>
+          {/* FORECAST ACCURACY */}
+          <div style={P}>
+            <div style={LB}>FORECAST ACCURACY</div>
+            {[{k:"sup",v:supAcc,set:setSupAcc,l:"Supply",c:"#3b82f6"},{k:"dem",v:demAcc,set:setDemAcc,l:"Demand",c:"#22c55e"},{k:"crd",v:crdAcc,set:setCrdAcc,l:"Crowd",c:"#ef4444"}].map(s=>(
+              <div key={s.k} style={{marginBottom:6}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                  <span style={{fontSize:f(8),color:s.c,fontWeight:600}}>{s.l}</span>
+                  <span style={{fontSize:f(9),fontWeight:800,color:s.c}}>{s.v}%</span>
+                </div>
+                <input type="range" min={0} max={100} value={s.v} onChange={e=>{s.set(+e.target.value);setAccP(null);}} style={{width:"100%",height:4,appearance:"none",WebkitAppearance:"none",background:"#1a2744",borderRadius:2,outline:"none",cursor:"pointer",accentColor:s.c}}/>
+              </div>))}
+            <div style={{display:"flex",gap:2,flexWrap:"wrap",marginTop:2}}>
+              {Object.entries(ACC_PRESETS).map(([n,p])=>(
+                <button key={n} onClick={()=>{setSupAcc(p.sup);setDemAcc(p.dem);setCrdAcc(p.crd);setAccP(n);}} style={{padding:"2px 5px",borderRadius:3,fontSize:f(7),fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:accP===n?"1px solid #60a5fa":"1px solid #1a2744",background:accP===n?"#3b82f610":"#0d1a2e",color:accP===n?"#60a5fa":"#4a6a8a"}}>{n}</button>))}
+            </div>
+          </div>
+          {/* STATE OF CHARGE */}
+          <div style={P}>
+            <div style={LB}>STATE OF CHARGE (SoC)</div>
+            <div style={{position:"relative",height:18,background:"#0d1a2e",borderRadius:3,overflow:"hidden",border:"1px solid #1a2744"}}>
+              <div style={{position:"absolute",left:minSoc+"%",top:0,width:1,height:"100%",background:"#ef444460",zIndex:1}}/>
+              <div style={{position:"absolute",left:maxSoc+"%",top:0,width:1,height:"100%",background:"#22c55e60",zIndex:1}}/>
+              <div style={{position:"absolute",left:0,top:0,height:"100%",width:soc+"%",borderRadius:3,background:(soc>=maxSoc-2?"#22c55e":soc>60?"#22c55e":soc>30?"#f59e0b":"#ef4444")+"50",transition:"width .4s"}}/>
+              <div style={{position:"absolute",width:"100%",textAlign:"center",fontSize:f(9),fontWeight:800,lineHeight:"18px",color:soc>=maxSoc-2?"#22c55e":soc>60?"#22c55e":soc>30?"#f59e0b":"#ef4444",zIndex:2}}>{soc.toFixed(0)}%</div>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",marginTop:3}}>
+              <span style={{fontSize:f(7),color:"#ef4444"}}>{minSoc}% min</span>
+              <span style={{fontSize:f(7),color:"#3a5a7a",fontWeight:600}}>{((soc/100)*battMWh).toFixed(0)} / {battMWh} MWh</span>
+              <span style={{fontSize:f(7),color:"#22c55e"}}>{maxSoc}% max</span>
+            </div>
+          </div>
+          {/* BATTERY CONSTRAINTS (collapsible) */}
+          <div style={{...P,border:"1px solid #22d3ee25"}}>
+            <div onClick={()=>setBattOpen(!battOpen)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",marginBottom:battOpen?6:0}}>
+              <div style={{display:"flex",alignItems:"center",gap:4}}>
+                <span style={{fontSize:f(8),color:"#22d3ee",fontWeight:700,transition:"transform .15s",display:"inline-block",transform:battOpen?"rotate(90deg)":"rotate(0deg)"}}>{"\u25B6"}</span>
+                <div style={{...LB,color:"#22d3ee",marginBottom:0}}>BATTERY CONSTRAINTS</div>
+              </div>
+              {battPreset&&<div style={{fontSize:f(7),fontWeight:600,color:"#22d3ee",padding:"1px 5px",background:"#22d3ee10",borderRadius:2,border:"1px solid #22d3ee30"}}>{battPreset}</div>}
+            </div>
+            {battOpen&&<div>
+            <div style={{display:"flex",gap:3,flexWrap:"wrap",marginBottom:8}}>
+              {Object.entries(BATT_PRESETS).map(([n,p])=>(
+                <button key={n} onClick={()=>applyBP(n,p)} style={{padding:"3px 6px",borderRadius:3,cursor:"pointer",fontFamily:"inherit",fontSize:f(7),fontWeight:600,border:battPreset===n?"1px solid #22d3ee":"1px solid #1a2744",background:battPreset===n?"#22d3ee10":"#0d1a2e",color:battPreset===n?"#22d3ee":"#5a7a9a"}}>{n}</button>))}
+            </div>
+            <div style={{fontSize:f(7),color:"#3a5a7a",fontWeight:700,letterSpacing:".06em",marginBottom:3}}>NAMEPLATE</div>
+            <NumField label="Power" value={battMW} setValue={setBattMW} min={1} max={500} step={5} unit="MW" color="#22d3ee"/>
+            <NumField label="Capacity" value={battMWh} setValue={setBattMWh} min={1} max={2000} step={10} unit="MWh" color="#22d3ee"/>
+            <NumField label="RTE" value={rte} setValue={v=>{setRte(Math.max(50,Math.min(100,v)));setBattPreset(null);}} min={50} max={100} step={1} unit="%" color="#f59e0b"/>
+            <div style={{height:1,background:"#1a274480",margin:"6px 0"}}/>
+            <div style={{fontSize:f(7),color:"#3a5a7a",fontWeight:700,letterSpacing:".06em",marginBottom:3}}>RATE LIMITS</div>
+            <NumField label="Charge" value={chgMW} setValue={setChgMW} min={1} max={battMW} step={1} unit="MW/h" color="#3b82f6"/>
+            <NumField label="Discharge" value={disMW} setValue={setDisMW} min={1} max={battMW} step={1} unit="MW/h" color="#22c55e"/>
+            {(chgMW<battMW||disMW<battMW)&&(<div style={{margin:"4px 0 0",padding:"3px 6px",background:"#f59e0b06",borderRadius:3,border:"1px solid #f59e0b15",fontSize:f(7),color:"#f59e0b",lineHeight:1.5}}>{chgMW<battMW&&<span>Chg {chgRatio.toFixed(0)}%</span>}{chgMW<battMW&&disMW<battMW&&" / "}{disMW<battMW&&<span>Dis {disRatio.toFixed(0)}%</span>} of nameplate</div>)}
+            <div style={{height:1,background:"#1a274480",margin:"6px 0"}}/>
+            <div style={{fontSize:f(7),color:"#3a5a7a",fontWeight:700,letterSpacing:".06em",marginBottom:3}}>SOC BOUNDS</div>
+            <NumField label="Min SOC" value={minSoc} setValue={setMinSoc} min={0} max={maxSoc-1} step={1} unit="%" color="#ef4444"/>
+            <NumField label="Max SOC" value={maxSoc} setValue={setMaxSoc} min={minSoc+1} max={100} step={1} unit="%" color="#22c55e"/>
+            <NumField label="Start SOC" value={startSoc} setValue={setStartSoc} min={minSoc} max={maxSoc} step={1} unit="%" color="#94a3b8"/>
+            <div style={{height:1,background:"#1a274480",margin:"6px 0"}}/>
+            <div style={{padding:"4px 6px",background:"#0d1a2e",borderRadius:3,border:"1px solid #1a2744"}}>
+              <DR l="Duration" v={duration.toFixed(1)+" hr"} c="#22d3ee"/>
+              <DR l="Usable Energy" v={usableMWh.toFixed(0)+" MWh"} c="#f59e0b"/>
+              <DR l="Start Energy" v={((startSoc/100)*battMWh).toFixed(0)+" MWh"} c="#94a3b8"/>
+              <div style={{height:1,background:"#1a274430",margin:"2px 0"}}/>
+              <DR l={"Chg "+chgPctHr.toFixed(1)+"%/hr"} v={fullChgHr.toFixed(1)+" hr full"} c="#3b82f6"/>
+              <DR l={"Dis "+disPctHr.toFixed(1)+"%/hr"} v={fullDisHr.toFixed(1)+" hr empty"} c="#22c55e"/>
+            </div>
+            </div>}
+          </div>
+          {/* FLEET SCALE */}
+          <div style={{...P,border:"1px solid #a855f725"}}>
+            <div style={{...LB,color:"#a855f7",marginBottom:4}}>FLEET SCALE</div>
+            <NumField label="Nodes" value={fleetN} setValue={v=>setFleetN(Math.max(1,Math.min(500,Math.round(v))))} min={1} max={500} step={1} unit="units" color="#a855f7"/>
+            {fleetN>1&&<div style={{padding:"4px 6px",background:"#a855f708",borderRadius:3,border:"1px solid #a855f720",marginTop:4}}>
+              <DR l="Fleet Power" v={(battMW*fleetN)>=1000?((battMW*fleetN)/1000).toFixed(1)+" GW":(battMW*fleetN)+" MW"} c="#a855f7"/>
+              <DR l="Fleet Capacity" v={(battMWh*fleetN)>=1000?((battMWh*fleetN)/1000).toFixed(1)+" GWh":(battMWh*fleetN)+" MWh"} c="#a855f7"/>
+              <DR l="Fleet Usable" v={(usableMWh*fleetN)>=1000?((usableMWh*fleetN)/1000).toFixed(1)+" GWh":(usableMWh*fleetN).toFixed(0)+" MWh"} c="#a855f7"/>
+            </div>}
+          </div>
+        </div>}
+      </div>
     </div>
   );
 }
