@@ -239,7 +239,7 @@ export default function Dashboard(){
   const mob=winW<768,tab=winW>=768&&winW<1080;
   // Font scale: bumps all sizes for readability
   const f=(base)=>mob?Math.round(base*1.6):tab?Math.round(base*1.2):Math.round(base*1.15);
-  const [selDay,setSelDay]=useState("Thu");
+  const [selDay,setSelDay]=useState("Mon");
 
   // ── Battery state ──────────────────────────────────────────
   const [battMW,setBattMW_]=useState(40);
@@ -504,7 +504,7 @@ export default function Dashboard(){
       {/* HEADER */}
       <div style={{display:"flex",flexDirection:mob?"column":"row",alignItems:mob?"stretch":"center",justifyContent:"space-between",marginBottom:6,paddingBottom:5,borderBottom:"1px solid #1a2744",gap:mob?8:0}}>
         <div>
-          <div style={{fontSize:f(14),fontWeight:800,letterSpacing:".08em",background:"linear-gradient(90deg,#22d3ee,#3b82f6)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>BESS CROWDING STRATEGY + REALTIME TRADING</div>
+          <div style={{fontSize:f(14),fontWeight:800,letterSpacing:".08em",background:"linear-gradient(90deg,#22d3ee,#3b82f6)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>SmartBidder™ Crowd Optimized Trading Simulator</div>
           <div style={{fontSize:f(8),color:"#3a5a7a",marginTop:1}}>ERCOT North Hub Jul 2024 &middot; {battMW}MW / {battMWh}MWh ({duration.toFixed(1)}hr) &middot; {rte}% RTE &middot; Chg {chgMW} / Dis {disMW} MW/h &middot; SOC {minSoc}-{maxSoc}%{fleetN>1?<span style={{color:"#a855f7"}}> &middot; {fleetN} units = {(battMW*fleetN).toLocaleString()}MW fleet</span>:null}</div>
         </div>
       </div>
