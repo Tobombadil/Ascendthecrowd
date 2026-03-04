@@ -190,13 +190,13 @@ function buildPartialDaySch(existing,dayKey,fromH,curSoc,b,sa,da,ca,observedRT){
 function getRec(hour,rt,forecast,soc,mode,sigTh,b){
   const sp=rt-forecast,vol=Math.max(Math.abs(forecast*.15),3),sig=sp/vol,abs=Math.abs(sig),{minSoc,maxSoc}=b;
   if(mode==="D"&&sig<-sigTh&&soc>minSoc+5)return{mode:"HOLD",conf:Math.min(95,70+abs*8),reason:"Crowd compression: RT $"+rt.toFixed(0)+", "+abs.toFixed(1)+"\u03C3 below fc.",tag:"CROWD",tc:"#ef4444",ovr:true};
-  if(mode==="H"&&sig>sigTh&&soc>minSoc+10&&hour>=14&&hour<=21)return{mode:"DISCHARGE",conf:Math.min(98,75+abs*10),reason:"Spike: RT $"+rt.toFixed(0)+", "+sig.toFixed(1)+"\u03C3 above fc.",tag:"SPIKE",tc:"#22c55e",ovr:true};
+  if(mode==="H"&&sig>sigTh&&soc>minSoc+10&&hour>=14&&hour<=21)return{mode:"DISCHARGE",conf:Math.min(98,75+abs*10),reason:"Spike: RT $"+rt.toFixed(0)+", "+sig.toFixed(1)+"\u03C3 above fc.",tag:"SPIKE",tc:"#ef4444",ovr:true};
   if(mode==="C"&&rt>forecast*1.3&&hour>=14)return{mode:"HOLD",conf:65,reason:"RT elevated ($"+rt.toFixed(0)+"). Defer charge.",tag:"PRICE",tc:"#f59e0b",ovr:true};
   if(mode==="D"&&soc<=minSoc+3)return{mode:"HOLD",conf:90,reason:"SOC "+soc.toFixed(0)+"% near floor ("+minSoc+"%).",tag:"SOC LOW",tc:"#ef4444",ovr:true};
   if(mode==="C"&&soc>=maxSoc-2)return{mode:"HOLD",conf:85,reason:"SOC "+soc.toFixed(0)+"% near ceiling ("+maxSoc+"%).",tag:"SOC HIGH",tc:"#22c55e",ovr:true};
   const mm={C:"CHARGE",D:"DISCHARGE",H:"HOLD"};return{mode:mm[mode]||"HOLD",conf:55,reason:"Following schedule. RT $"+rt.toFixed(0)+"/MWh.",tag:null,tc:null,ovr:false};}
 
-const MC={C:"#3b82f6",D:"#22c55e",H:"#1e293b",CHARGE:"#3b82f6",DISCHARGE:"#22c55e",HOLD:"#94a3b8"};
+const MC={C:"#22c55e",D:"#ef4444",H:"#1e293b",CHARGE:"#22c55e",DISCHARGE:"#ef4444",HOLD:"#94a3b8"};
 const ML={C:"CHG",D:"DIS",H:""};const MCYC={H:"C",C:"D",D:"H"};
 function fmtDol(v){const a=Math.abs(v),s=v<0?"-":"";if(a>=1e9)return s+"$"+(a/1e9).toFixed(1)+"B";if(a>=1e6)return s+"$"+(a/1e6).toFixed(1)+"M";if(a>=1e4)return s+"$"+(a/1e3).toFixed(0)+"K";if(a>=1e3)return s+"$"+(a/1e3).toFixed(1)+"K";return s+"$"+a.toFixed(0);}
 
@@ -449,7 +449,7 @@ export default function Dashboard(){
 
   // ── Shared override buttons ────────────────────────────────
   const OvrBtns=({compact})=>{
-    const items=[{m:"CHARGE",s:"Charge",c:"#3b82f6",dis:soc>=maxSoc},{m:"DISCHARGE",s:"Discharge",c:"#22c55e",dis:soc<=minSoc},{m:"HOLD",s:"HOLD",c:"#94a3b8",dis:false}];
+    const items=[{m:"CHARGE",s:"Charge",c:"#22c55e",dis:soc>=maxSoc},{m:"DISCHARGE",s:"Discharge",c:"#ef4444",dis:soc<=minSoc},{m:"HOLD",s:"HOLD",c:"#94a3b8",dis:false}];
     const canRtOpt=ticks.length>=2&&running;
     return(
     <div style={{display:"flex",flexDirection:"column",gap:compact?2:3,minWidth:0}}>
@@ -701,8 +701,8 @@ export default function Dashboard(){
               onMouseLeave={()=>setHovH(null)}>
               {cp.yT.map(t=><g key={t.v}><line x1={PD.l} y1={t.py} x2={CW-PD.r} y2={t.py} stroke="#1a2744" strokeWidth=".5"/><text x={PD.l-3} y={t.py+3} textAnchor="end" fill="#3a5a7a" fontSize="7" fontFamily="inherit">${t.v}</text></g>)}
               {[0,4,8,12,16,20].map(h=><text key={h} x={cp.x(h)} y={CH-3} textAnchor="middle" fill="#3a5a7a" fontSize="7" fontFamily="inherit">HE{h}</text>)}
-              {fcs.map((f,i)=>{const m=cp.sch[i];return m!=="H"&&<rect key={i} x={cp.x(i)-pW/48} y={PD.t} width={pW/24} height={pH} fill={MC[m]} opacity=".08"/>;})}
-              {cp.gap.map((g,i)=>i<23&&<rect key={i} x={g.x} y={g.u} width={pW/24} height={Math.max(1,g.lo-g.u)} fill={g.f} opacity=".06"/>)}
+              {fcs.map((f,i)=>{const m=cp.sch[i];return m!=="H"&&<rect key={i} x={cp.x(i)} y={PD.t} width={pW/23} height={pH} fill={MC[m]} opacity=".08"/>;})}
+              {cp.gap.map((g,i)=>i<23&&<rect key={i} x={g.x} y={g.u} width={pW/23} height={Math.max(1,g.lo-g.u)} fill={g.f} opacity=".06"/>)}
               <path d={cp.dP} fill="none" stroke="#94a3b8" strokeWidth="1" strokeDasharray="4,3" opacity=".5"/>
               <path d={cp.fP} fill="none" stroke="#f59e0b" strokeWidth="1.5"/>
               <path d={cp.rP} fill="none" stroke="#22d3ee" strokeWidth="1.5"/>
@@ -715,23 +715,34 @@ export default function Dashboard(){
               </g>);})()}
               {/* Sim playhead */}
               {(running||ticks.length>0)&&selDay===DAYS[simD]&&(()=>{
-                const simPos=simH+simM/60,px=cp.x(simPos),rtVal=last?last.rt:null,fcH=fcs[simH];
-                const rtY=rtVal!==null?cp.y(rtVal):0;
+                const simPos=simH+simM/60,px=cp.x(simPos),rtVal=last?last.rt:null;
+                const rtY=rtVal!==null?Math.max(PD.t,Math.min(PD.t+pH,cp.y(rtVal))):PD.t+pH/2;
+                const labelY=Math.max(PD.t+2,Math.min(PD.t+pH-8,rtY));
                 const flipLabel=px>CW*0.7;
+                const hx=cp.x(simH);
+                const fc=fcs[simH];
                 return(<g>
                   <rect x={PD.l} y={PD.t} width={Math.max(0,px-PD.l)} height={pH} fill="#22d3ee" opacity=".03"/>
                   <line x1={px} y1={PD.t-2} x2={px} y2={PD.t+pH+2} stroke="#22d3ee" strokeWidth="1.5" opacity=".7"/>
                   <line x1={px} y1={PD.t-2} x2={px} y2={PD.t+pH+2} stroke="#22d3ee" strokeWidth="4" opacity=".1"/>
                   <rect x={px-(flipLabel?36:0)} y={PD.t-12} width={36} height={11} rx="2" fill="#0b1628" stroke="#22d3ee" strokeWidth=".5" opacity=".9"/>
                   <text x={px-(flipLabel?36:0)+18} y={PD.t-3.5} textAnchor="middle" fill="#22d3ee" fontSize="7" fontWeight="700" fontFamily="inherit">{String(simH).padStart(2,"0")}:{String(simM).padStart(2,"0")}</text>
-                  {fcH&&<><circle cx={cp.x(simH)} cy={cp.y(fcH.dam)} r="2" fill="#94a3b8" opacity=".5"/><circle cx={cp.x(simH)} cy={cp.y(fcH.fc)} r="2" fill="#f59e0b" opacity=".5"/><circle cx={cp.x(simH)} cy={cp.y(fcH.rtm)} r="2" fill="#22d3ee" opacity=".5"/></>}
-                  {rtVal!==null&&<><circle cx={px} cy={rtY} r="6" fill="#22d3ee" opacity=".15"/><circle cx={px} cy={rtY} r="3.5" fill="#22d3ee" opacity=".3"/><circle cx={px} cy={rtY} r="2" fill="#fff" stroke="#22d3ee" strokeWidth="1"/>
-                    <rect x={flipLabel?px-52:px+6} y={rtY-6} width={46} height={13} rx="2" fill="#0b1628" stroke="#22d3ee40" strokeWidth=".5"/>
-                    <text x={flipLabel?px-29:px+29} y={rtY+3} textAnchor="middle" fill="#22d3ee" fontSize="8" fontWeight="800" fontFamily="inherit">RT ${rtVal.toFixed(0)}</text>
-                  </>}
-                  {rec&&<><rect x={px-(flipLabel?32:0)} y={PD.t+pH+3} width={32} height={10} rx="2" fill={(MC[eMode]||"#94a3b8")+"20"} stroke={(MC[eMode]||"#94a3b8")+"40"} strokeWidth=".5"/>
+                  {fc&&<g>
+                    <circle cx={hx} cy={cp.y(fc.dam)} r="2" fill="#94a3b8" opacity=".6"/>
+                    <circle cx={hx} cy={cp.y(fc.fc)} r="2" fill="#f59e0b" opacity=".6"/>
+                    <circle cx={hx} cy={cp.y(fc.rtm)} r="2" fill="#22d3ee" opacity=".6"/>
+                  </g>}
+                  {rtVal!==null&&<g>
+                    <circle cx={px} cy={rtY} r="6" fill="#22d3ee" opacity=".15"/>
+                    <circle cx={px} cy={rtY} r="3.5" fill="#22d3ee" opacity=".3"/>
+                    <circle cx={px} cy={rtY} r="2" fill="#fff" stroke="#22d3ee" strokeWidth="1"/>
+                    <rect x={flipLabel?px-52:px+6} y={labelY-6} width={46} height={13} rx="2" fill="#0b1628" stroke="#22d3ee40" strokeWidth=".5"/>
+                    <text x={flipLabel?px-29:px+29} y={labelY+3} textAnchor="middle" fill="#22d3ee" fontSize="8" fontWeight="800" fontFamily="inherit">RT ${rtVal.toFixed(0)}</text>
+                  </g>}
+                  {rec&&<g>
+                    <rect x={px-(flipLabel?32:0)} y={PD.t+pH+3} width={32} height={10} rx="2" fill={(MC[eMode]||"#94a3b8")+"20"} stroke={(MC[eMode]||"#94a3b8")+"40"} strokeWidth=".5"/>
                     <text x={px-(flipLabel?32:0)+16} y={PD.t+pH+10.5} textAnchor="middle" fill={MC[eMode]||"#94a3b8"} fontSize="6" fontWeight="700" fontFamily="inherit">{eMode==="CHARGE"?"CHG":eMode==="DISCHARGE"?"DIS":"HLD"}</text>
-                  </>}
+                  </g>}
                 </g>);
               })()}
             </svg>
@@ -747,7 +758,7 @@ export default function Dashboard(){
             </div>
             <SchGrid compact={false}/>
             <div style={{fontSize:f(7),color:"#3a5a7a",marginTop:3}}>
-              Click: <span style={{color:"#3b82f6"}}>CHG</span> {"\u2192"} <span style={{color:"#22c55e"}}>DIS</span> {"\u2192"} HOLD. Drag to paint.
+              Click: <span style={{color:"#22c55e"}}>CHG</span> {"\u2192"} <span style={{color:"#ef4444"}}>DIS</span> {"\u2192"} HOLD. Drag to paint.
               {clipN>0&&<span style={{color:"#f59e0b"}}> {clipN}hr partial: SOC near {minSoc}% or {maxSoc}% limit, battery charges/discharges at reduced rate.</span>}
             </div>
           </div>
@@ -812,8 +823,8 @@ export default function Dashboard(){
             <NumField label="RTE" value={rte} setValue={v=>{setRte(Math.max(50,Math.min(100,v)));setBattPreset(null);}} min={50} max={100} step={1} unit="%" color="#f59e0b"/>
             <div style={{height:1,background:"#1a274480",margin:"6px 0"}}/>
             <div style={{fontSize:f(7),color:"#3a5a7a",fontWeight:700,letterSpacing:".06em",marginBottom:3}}>RATE LIMITS</div>
-            <NumField label="Charge" value={chgMW} setValue={setChgMW} min={1} max={battMW} step={1} unit="MW/h" color="#3b82f6"/>
-            <NumField label="Discharge" value={disMW} setValue={setDisMW} min={1} max={battMW} step={1} unit="MW/h" color="#22c55e"/>
+            <NumField label="Charge" value={chgMW} setValue={setChgMW} min={1} max={battMW} step={1} unit="MW/h" color="#22c55e"/>
+            <NumField label="Discharge" value={disMW} setValue={setDisMW} min={1} max={battMW} step={1} unit="MW/h" color="#ef4444"/>
             {(chgMW<battMW||disMW<battMW)&&(<div style={{margin:"4px 0 0",padding:"3px 6px",background:"#f59e0b06",borderRadius:3,border:"1px solid #f59e0b15",fontSize:f(7),color:"#f59e0b",lineHeight:1.5}}>{chgMW<battMW&&<span>Chg {chgRatio.toFixed(0)}%</span>}{chgMW<battMW&&disMW<battMW&&" / "}{disMW<battMW&&<span>Dis {disRatio.toFixed(0)}%</span>} of nameplate</div>)}
             <div style={{height:1,background:"#1a274480",margin:"6px 0"}}/>
             <div style={{fontSize:f(7),color:"#3a5a7a",fontWeight:700,letterSpacing:".06em",marginBottom:3}}>SOC BOUNDS</div>
@@ -826,8 +837,8 @@ export default function Dashboard(){
               <DR l="Usable Energy" v={usableMWh.toFixed(0)+" MWh"} c="#f59e0b"/>
               <DR l="Start Energy" v={((startSoc/100)*battMWh).toFixed(0)+" MWh"} c="#94a3b8"/>
               <div style={{height:1,background:"#1a274430",margin:"2px 0"}}/>
-              <DR l={"Chg "+chgPctHr.toFixed(1)+"%/hr"} v={fullChgHr.toFixed(1)+" hr full"} c="#3b82f6"/>
-              <DR l={"Dis "+disPctHr.toFixed(1)+"%/hr"} v={fullDisHr.toFixed(1)+" hr empty"} c="#22c55e"/>
+              <DR l={"Chg "+chgPctHr.toFixed(1)+"%/hr"} v={fullChgHr.toFixed(1)+" hr full"} c="#22c55e"/>
+              <DR l={"Dis "+disPctHr.toFixed(1)+"%/hr"} v={fullDisHr.toFixed(1)+" hr empty"} c="#ef4444"/>
             </div>
             </div>}
           </div>
