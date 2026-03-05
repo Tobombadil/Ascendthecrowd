@@ -504,7 +504,7 @@ export default function Dashboard(){
       {/* HEADER */}
       <div style={{display:"flex",flexDirection:mob?"column":"row",alignItems:mob?"stretch":"center",justifyContent:"space-between",marginBottom:6,paddingBottom:5,borderBottom:"1px solid #1a2744",gap:mob?8:0}}>
         <div>
-          <div style={{fontSize:f(14),fontWeight:800,letterSpacing:".08em",background:"linear-gradient(90deg,#22d3ee,#3b82f6)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>SmartBidder™ Trading Optimization Simulator</div>
+          <div style={{fontSize:f(14),fontWeight:800,letterSpacing:".08em",background:"linear-gradient(90deg,#22d3ee,#3b82f6)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>SmartBidder™ Crowd Optimized Trading Simulator</div>
           <div style={{fontSize:f(8),color:"#3a5a7a",marginTop:1}}>ERCOT North Hub Jul 2024 &middot; {battMW}MW / {battMWh}MWh ({duration.toFixed(1)}hr) &middot; {rte}% RTE &middot; Chg {chgMW} / Dis {disMW} MW/h &middot; SOC {minSoc}-{maxSoc}%{fleetN>1?<span style={{color:"#a855f7"}}> &middot; {fleetN} units = {(battMW*fleetN).toLocaleString()}MW fleet</span>:null}</div>
         </div>
       </div>
@@ -534,33 +534,43 @@ export default function Dashboard(){
                 <button key={s.v} onClick={()=>setSpeed(s.v)} style={{flex:1,padding:"3px 0",borderRadius:3,border:speed===s.v?"1px solid #3b82f6":"1px solid #1a2744",background:speed===s.v?"#3b82f620":"#0d1a2e",color:speed===s.v?"#60a5fa":"#4a6a8a",fontFamily:"inherit",fontSize:f(8),fontWeight:600,cursor:"pointer",textAlign:"center"}}>{s.l}</button>))}
             </div>
           </div>
-          {/* Active mode + override */}
+          {/* Active mode + system rec unified */}
           <div style={{...P,background:(MC[eMode]||"#94a3b8")+"08",borderColor:(MC[eMode]||"#94a3b8")+"30"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-              <div style={LB}>ACTIVE MODE</div>
-              {manual&&<div style={{fontSize:f(7),fontWeight:700,padding:"1px 4px",borderRadius:2,background:"#f59e0b15",border:"1px solid #f59e0b30",color:"#f59e0b"}}>OVERRIDE</div>}
+              <div style={{display:"flex",alignItems:"center",gap:4}}>
+                <div style={{fontSize:f(14),fontWeight:900,color:MC[eMode]||"#94a3b8",lineHeight:1}}>{eMode}</div>
+                {manual&&<div style={{fontSize:f(7),fontWeight:700,padding:"1px 4px",borderRadius:2,background:"#f59e0b15",border:"1px solid #f59e0b30",color:"#f59e0b"}}>OVERRIDE</div>}
+              </div>
+              <div style={{fontSize:f(7),color:"#5a7a9a",textAlign:"right"}}>
+                {eMode==="CHARGE"?"Buying "+chgMW+"MW":eMode==="DISCHARGE"?"Selling "+disMW+"MW":"Idle"}{last?" @ $"+last.rt:""}
+              </div>
             </div>
-            <div style={{fontSize:f(14),fontWeight:900,color:MC[eMode]||"#94a3b8",lineHeight:1.1,marginBottom:2}}>{eMode}</div>
-            <div style={{fontSize:f(7),color:"#5a7a9a",marginBottom:8}}>
-              {eMode==="CHARGE"?"Buying "+chgMW+"MW":eMode==="DISCHARGE"?"Selling "+disMW+"MW":"Idle"}{last?" @ $"+last.rt+"/MWh":""}
-            </div>
-            <div style={{borderTop:"1px solid #1a2744",paddingTop:6}}>
+            {rec&&rec.tag&&<div style={{display:"flex",alignItems:"center",gap:4,marginBottom:4}}>
+              <div style={{fontSize:f(7),fontWeight:700,padding:"1px 4px",borderRadius:2,background:(rec.tc||"#f59e0b")+"20",color:rec.tc||"#f59e0b"}}>{rec.tag}</div>
+              <div style={{flex:1,height:3,background:"#0d1a2e",borderRadius:2,overflow:"hidden"}}><div style={{height:"100%",width:rec.conf+"%",borderRadius:2,background:MC[rec.mode],transition:"width .3s"}}/></div>
+              <span style={{fontSize:f(7),color:"#5a7a9a"}}>{rec.conf}%</span>
+            </div>}
+            {rec&&<div style={{fontSize:f(7),color:"#5a7a9a",lineHeight:1.4,marginBottom:4}}>{rec.reason}</div>}
+            {rec&&rec.ovr&&!manual&&<div style={{padding:"2px 4px",background:"#f59e0b10",borderRadius:2,border:"1px solid #f59e0b20",fontSize:f(7),color:"#f59e0b",marginBottom:4}}>Overriding schedule</div>}
+            <div style={{borderTop:"1px solid #1a2744",paddingTop:5}}>
               <div style={{fontSize:f(7),fontWeight:600,color:"#4a6a8a",letterSpacing:".08em",marginBottom:4}}>OVERRIDE</div>
               <OvrBtns/>
             </div>
           </div>
-          {/* System rec */}
-          <div style={{...P,background:rec?(MC[rec.mode]||"#94a3b8")+"08":"#0b1628"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
-              <div style={LB}>SYSTEM REC</div>
-              {rec&&rec.tag&&<div style={{fontSize:f(7),fontWeight:700,padding:"1px 4px",borderRadius:2,background:(rec.tc||"#f59e0b")+"20",color:rec.tc||"#f59e0b"}}>{rec.tag}</div>}
+          {/* State of Charge */}
+          <div style={P}>
+            <div style={LB}>STATE OF CHARGE (SoC)</div>
+            <div style={{position:"relative",height:18,background:"#0d1a2e",borderRadius:3,overflow:"hidden",border:"1px solid #1a2744"}}>
+              <div style={{position:"absolute",left:minSoc+"%",top:0,width:1,height:"100%",background:"#ef444460",zIndex:1}}/>
+              <div style={{position:"absolute",left:maxSoc+"%",top:0,width:1,height:"100%",background:"#22c55e60",zIndex:1}}/>
+              <div style={{position:"absolute",left:0,top:0,height:"100%",width:soc+"%",borderRadius:3,background:(soc>=maxSoc-2?"#22c55e":soc>60?"#22c55e":soc>30?"#f59e0b":"#ef4444")+"50",transition:"width .4s"}}/>
+              <div style={{position:"absolute",width:"100%",textAlign:"center",fontSize:f(9),fontWeight:800,lineHeight:"18px",color:soc>=maxSoc-2?"#22c55e":soc>60?"#22c55e":soc>30?"#f59e0b":"#ef4444",zIndex:2}}>{soc.toFixed(0)}%</div>
             </div>
-            {rec?(<div>
-              <div style={{fontSize:f(14),fontWeight:900,color:MC[rec.mode],marginBottom:2}}>{rec.mode}</div>
-              <div style={{height:3,background:"#0d1a2e",borderRadius:2,marginBottom:4,overflow:"hidden"}}><div style={{height:"100%",width:rec.conf+"%",borderRadius:2,background:MC[rec.mode],transition:"width .3s"}}/></div>
-              <div style={{fontSize:f(7),color:"#5a7a9a",lineHeight:1.5}}>{rec.reason}</div>
-              {rec.ovr&&!manual&&<div style={{marginTop:3,padding:"2px 4px",background:"#f59e0b10",borderRadius:2,border:"1px solid #f59e0b20",fontSize:f(7),color:"#f59e0b"}}>Overriding schedule</div>}
-            </div>):<div style={{color:"#2a4a6a",fontSize:f(9)}}>Press RUN to start</div>}
+            <div style={{display:"flex",justifyContent:"space-between",marginTop:3}}>
+              <span style={{fontSize:f(7),color:"#ef4444"}}>{minSoc}% min</span>
+              <span style={{fontSize:f(7),color:"#3a5a7a",fontWeight:600}}>{((soc/100)*battMWh).toFixed(0)} / {battMWh} MWh</span>
+              <span style={{fontSize:f(7),color:"#22c55e"}}>{maxSoc}% max</span>
+            </div>
           </div>
           {/* P&L */}
           <div style={P}>
@@ -579,16 +589,6 @@ export default function Dashboard(){
                 <div style={{textAlign:"center"}}><div style={{fontSize:f(12),fontWeight:800,color:sPnl>=0?"#22c55e":"#ef4444"}}>{fmtDol(sPnl*fleetN)}</div><div style={{fontSize:f(7),color:"#4a6a8a",fontWeight:600}}>SYSTEM</div></div>
               </div>
             </div>}
-          </div>
-          {/* Risk tolerance */}
-          <div style={P}>
-            <div style={LB}>RISK TOLERANCE</div>
-            <div style={{display:"flex",gap:2}}>
-              {[{v:1,l:"1\u03C3",c:"#ef4444"},{v:2,l:"2\u03C3",c:"#f59e0b"},{v:3,l:"3\u03C3",c:"#22c55e"}].map(o=>(
-                <button key={o.v} onClick={()=>setSigTh(o.v)} style={{flex:1,padding:"4px",borderRadius:3,cursor:"pointer",fontFamily:"inherit",textAlign:"center",border:sigTh===o.v?"2px solid "+o.c:"1px solid #1a2744",background:sigTh===o.v?o.c+"15":"#0d1a2e"}}>
-                  <div style={{fontSize:f(12),fontWeight:800,color:sigTh===o.v?o.c:"#3a5a7a"}}>{o.l}</div>
-                </button>))}
-            </div>
           </div>
           {/* Revenue */}
           <div style={P}>
@@ -788,19 +788,14 @@ export default function Dashboard(){
                 <button key={n} onClick={()=>{setSupAcc(p.sup);setDemAcc(p.dem);setCrdAcc(p.crd);setAccP(n);}} style={{padding:"2px 5px",borderRadius:3,fontSize:f(7),fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:accP===n?"1px solid #60a5fa":"1px solid #1a2744",background:accP===n?"#3b82f610":"#0d1a2e",color:accP===n?"#60a5fa":"#4a6a8a"}}>{n}</button>))}
             </div>
           </div>
-          {/* STATE OF CHARGE */}
+          {/* RISK TOLERANCE */}
           <div style={P}>
-            <div style={LB}>STATE OF CHARGE (SoC)</div>
-            <div style={{position:"relative",height:18,background:"#0d1a2e",borderRadius:3,overflow:"hidden",border:"1px solid #1a2744"}}>
-              <div style={{position:"absolute",left:minSoc+"%",top:0,width:1,height:"100%",background:"#ef444460",zIndex:1}}/>
-              <div style={{position:"absolute",left:maxSoc+"%",top:0,width:1,height:"100%",background:"#22c55e60",zIndex:1}}/>
-              <div style={{position:"absolute",left:0,top:0,height:"100%",width:soc+"%",borderRadius:3,background:(soc>=maxSoc-2?"#22c55e":soc>60?"#22c55e":soc>30?"#f59e0b":"#ef4444")+"50",transition:"width .4s"}}/>
-              <div style={{position:"absolute",width:"100%",textAlign:"center",fontSize:f(9),fontWeight:800,lineHeight:"18px",color:soc>=maxSoc-2?"#22c55e":soc>60?"#22c55e":soc>30?"#f59e0b":"#ef4444",zIndex:2}}>{soc.toFixed(0)}%</div>
-            </div>
-            <div style={{display:"flex",justifyContent:"space-between",marginTop:3}}>
-              <span style={{fontSize:f(7),color:"#ef4444"}}>{minSoc}% min</span>
-              <span style={{fontSize:f(7),color:"#3a5a7a",fontWeight:600}}>{((soc/100)*battMWh).toFixed(0)} / {battMWh} MWh</span>
-              <span style={{fontSize:f(7),color:"#22c55e"}}>{maxSoc}% max</span>
+            <div style={LB}>RISK TOLERANCE</div>
+            <div style={{display:"flex",gap:2}}>
+              {[{v:1,l:"1\u03C3",c:"#ef4444"},{v:2,l:"2\u03C3",c:"#f59e0b"},{v:3,l:"3\u03C3",c:"#22c55e"}].map(o=>(
+                <button key={o.v} onClick={()=>setSigTh(o.v)} style={{flex:1,padding:"4px",borderRadius:3,cursor:"pointer",fontFamily:"inherit",textAlign:"center",border:sigTh===o.v?"2px solid "+o.c:"1px solid #1a2744",background:sigTh===o.v?o.c+"15":"#0d1a2e"}}>
+                  <div style={{fontSize:f(12),fontWeight:800,color:sigTh===o.v?o.c:"#3a5a7a"}}>{o.l}</div>
+                </button>))}
             </div>
           </div>
           {/* BATTERY CONSTRAINTS (collapsible) */}
