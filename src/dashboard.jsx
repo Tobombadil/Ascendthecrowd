@@ -977,7 +977,7 @@ export default function Dashboard(){
               onMouseMove={e=>{const r=e.currentTarget.getBoundingClientRect();const mx=(e.clientX-r.left)/r.width*CW;const h=Math.round(((mx-PD.l)/pW)*23);setHovH(h>=0&&h<=23?h:null);}}
               onMouseLeave={()=>setHovH(null)}>
               {cp.yT.map(t=><g key={t.v}><line x1={PD.l} y1={t.py} x2={CW-PD.r} y2={t.py} stroke="#1a2744" strokeWidth=".5"/><text x={PD.l-3} y={t.py+3} textAnchor="end" fill="#3a5a7a" fontSize="7" fontFamily="inherit">${t.v}</text></g>)}
-              {[0,4,8,12,16,20].map(h=><text key={h} x={cp.x(h)} y={CH-3} textAnchor="middle" fill="#3a5a7a" fontSize="7" fontFamily="inherit">HE{h}</text>)}
+              {[0,4,8,12,16,20].map(h=><text key={h} x={cp.x(h)} y={CH-3} textAnchor="middle" fill="#3a5a7a" fontSize="7" fontFamily="inherit">{String(h).padStart(2,"0")+":00"}</text>)}
               {(()=>{const sub=subSchRef.current[selDay];const qW=pW/23/4;
                 return sub?Array.from({length:96},(_, qi)=>{const m=sub[qi];if(m==="H")return null;
                   const h=qi/4;const x=cp.x(h);
