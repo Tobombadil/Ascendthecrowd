@@ -79,77 +79,112 @@ const BATT_PRESETS={
   "100MW Density":{mw:100,mwh:400, chgMW:25,disMW:25,rte:87,minSoc:10,maxSoc:90},
 };
 
+// ── Core constants ────────────────────────────────────────────
+const FLOOR_MAR=3,CEIL_MAR=2; // SOC safety margins: eMin=minSoc+FLOOR_MAR, eMax=maxSoc-CEIL_MAR
+const SPH=4; // sub-hourly slots per hour (15-min resolution)
+
 // ── Core math ─────────────────────────────────────────────────
 function fcast(dam,rtm,sS,dS,cS,sa,da,ca){return dam+(rtm-dam)*(sS*(sa/100)+dS*(da/100)+cS*(ca/100));}
 function gauss(){let u=0,v=0;while(!u)u=Math.random();while(!v)v=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
 
 function calcSOCTraj(sch,dayKey,b,s0){
-  const arr=sch[dayKey],{mwh,chgMW,disMW,rte,minSoc,maxSoc}=b,out=[];let s=s0;
+  const arr=sch[dayKey],{mwh,chgMW,disMW,rte,minSoc,maxSoc,floorMar=FLOOR_MAR,ceilMar=CEIL_MAR}=b;
+  const eMin=minSoc+floorMar,eMax=maxSoc-ceilMar;
+  const out=[];let s=s0;
   for(let h=0;h<24;h++){const m=arr[h];let clip=false,clipHi=false,clipLo=false;
-    if(m==="C"){const d=(chgMW*rte/mwh)*100,av=maxSoc-s;if(av<=0){clip=true;clipHi=true;}else{s+=Math.min(d,av);if(d>av){clip=true;clipHi=true;}}}
-    else if(m==="D"){const d=(disMW/mwh)*100,av=s-minSoc;if(av<=0){clip=true;clipLo=true;}else{s-=Math.min(d,av);if(d>av){clip=true;clipLo=true;}}}
+    if(m==="C"){const d=(chgMW*rte/mwh)*100,av=eMax-s;if(av<=0){clip=true;clipHi=true;}else{s+=Math.min(d,av);if(d>av){clip=true;clipHi=true;}}}
+    else if(m==="D"){const d=(disMW/mwh)*100,av=s-eMin;if(av<=0){clip=true;clipLo=true;}else{s-=Math.min(d,av);if(d>av){clip=true;clipLo=true;}}}
     out.push({h,soc:s,mode:m,clip,clipHi,clipLo});}return out;}
 
 // Chain SOC through the week up to (but not including) the target day.
 // Returns the starting SOC for that day after simulating all prior days.
-function daySoc(sch,targetDay,b,s0){
-  const{mwh,chgMW,disMW,rte,minSoc,maxSoc}=b;
-  const cPct=(chgMW*rte/mwh)*100,dPct=(disMW/mwh)*100;
+function daySoc(sch,targetDay,b,s0,subSch){
+  const{mwh,chgMW,disMW,rte,minSoc,maxSoc,floorMar=FLOOR_MAR,ceilMar=CEIL_MAR}=b;
+  const eMin=minSoc+floorMar,eMax=maxSoc-ceilMar;
   let s=s0;
   for(const dk of DAYS){
     if(dk===targetDay)break;
-    const arr=sch[dk];
-    for(let h=0;h<24;h++){
-      if(arr[h]==="C")s=Math.min(maxSoc,s+cPct);
-      else if(arr[h]==="D")s=Math.max(minSoc,s-dPct);
+    if(subSch&&subSch[dk]&&subSch[dk].length===96){
+      const sub=subSch[dk];
+      const cP=(chgMW*rte/mwh)*100/SPH,dP=(disMW/mwh)*100/SPH;
+      for(let slot=0;slot<96;slot++){
+        if(sub[slot]==="C")s=Math.min(eMax,s+Math.min(cP,eMax-s));
+        else if(sub[slot]==="D")s=Math.max(eMin,s-Math.min(dP,s-eMin));
+      }
+    } else {
+      const arr=sch[dk];
+      const cPct=(chgMW*rte/mwh)*100,dPct=(disMW/mwh)*100;
+      for(let h=0;h<24;h++){
+        if(arr[h]==="C")s=Math.min(eMax,s+Math.min(cPct,eMax-s));
+        else if(arr[h]==="D")s=Math.max(eMin,s-Math.min(dPct,s-eMin));
+      }
     }
   }
   return s;
 }
 
-function calcRev(sch,dayKey,b,sa,da,ca,src,s0){
-  const data=WEEK[dayKey].d,arr=sch[dayKey],{mwh,chgMW,disMW,rte,minSoc,maxSoc}=b;let rev=0,s=s0;
-  data.forEach(([h,dam,rtm,sS,dS,cS])=>{
-    const p=src==="rtm"?rtm:src==="dam"?dam:fcast(dam,rtm,sS,dS,cS,sa,da,ca);
-    if(arr[h]==="D"){const dp=(disMW/mwh)*100,a=Math.min(dp,s-minSoc);if(a>0){rev+=p*(a/100)*mwh;s-=a;}}
-    else if(arr[h]==="C"){const cp=(chgMW*rte/mwh)*100,a=Math.min(cp,maxSoc-s);if(a>0){rev-=p*((a/100)*mwh/rte);s+=a;}}});return rev;}
+function calcRev(sch,dayKey,b,sa,da,ca,src,s0,subSch){
+  const data=WEEK[dayKey].d,{mwh,chgMW,disMW,rte,minSoc,maxSoc,floorMar=FLOOR_MAR,ceilMar=CEIL_MAR}=b;
+  const eMin=minSoc+floorMar,eMax=maxSoc-ceilMar;
+  let rev=0,s=s0;
+  if(subSch&&subSch[dayKey]&&subSch[dayKey].length===96){
+    const sub=subSch[dayKey];
+    const cP=(chgMW*rte/mwh)*100/SPH,dP=(disMW/mwh)*100/SPH;
+    const hourlyP=data.map(([h,dam,rtm,sS,dS,cS])=>src==="rtm"?rtm:src==="dam"?dam:fcast(dam,rtm,sS,dS,cS,sa,da,ca));
+    const subP=interpPrices(hourlyP,SPH);
+    for(let slot=0;slot<96;slot++){
+      const p=subP[slot];
+      if(sub[slot]==="D"){const a=Math.min(dP,s-eMin);if(a>0){rev+=p*(a/100)*mwh;s-=a;}}
+      else if(sub[slot]==="C"){const a=Math.min(cP,eMax-s);if(a>0){rev-=p*((a/100)*mwh/rte);s+=a;}}
+    }
+  } else {
+    const arr=sch[dayKey];
+    const cPct=(chgMW*rte/mwh)*100,dPct=(disMW/mwh)*100;
+    data.forEach(([h,dam,rtm,sS,dS,cS])=>{
+      const p=src==="rtm"?rtm:src==="dam"?dam:fcast(dam,rtm,sS,dS,cS,sa,da,ca);
+      if(arr[h]==="D"){const a=Math.min(dPct,s-eMin);if(a>0){rev+=p*(a/100)*mwh;s-=a;}}
+      else if(arr[h]==="C"){const a=Math.min(cPct,eMax-s);if(a>0){rev-=p*((a/100)*mwh/rte);s+=a;}}
+    });
+  }
+  return rev;}
 
-// ── Interpolate prices to sub-hourly resolution ──────────────
+// ── Interpolate hourly prices to sub-hourly (cosine for smooth transitions) ──
 function interpPrices(hourlyPrices,slotsPerHour){
   const n=hourlyPrices.length,total=n*slotsPerHour;
   const out=new Array(total);
   for(let s=0;s<total;s++){
-    const t=s/slotsPerHour; // fractional hour position
+    const t=s/slotsPerHour;
     const h0=Math.floor(t),h1=Math.min(n-1,h0+1);
     const frac=t-h0;
-    // Cosine interpolation for smooth transitions
     const mu=(1-Math.cos(frac*Math.PI))/2;
     out[s]=hourlyPrices[h0]*(1-mu)+hourlyPrices[h1]*mu;
   }
   return out;
 }
 
-// ── Constraint-aware schedule builder (sub-hourly DP) ─────────
-function buildDaySch(prices,b,s0){
-  const{mwh,chgMW,disMW,rte,minSoc,maxSoc,floorMar=3,ceilMar=2,termVal=0}=b;
+// ── Sub-hourly DP optimizer (works for any number of hours) ──
+function runDP(prices,b,s0){
+  const{mwh,chgMW,disMW,rte,minSoc,maxSoc,floorMar=FLOOR_MAR,ceilMar=CEIL_MAR,termVal=0}=b;
   const eMin=minSoc+floorMar,eMax=maxSoc-ceilMar;
-  const SPH=4;
+  const nH=prices.length;
   const cP=(chgMW*rte/mwh)*100/SPH,dP=(disMW/mwh)*100/SPH;
   const subPrices=interpPrices(prices,SPH);
-  const nSlots=24*SPH;
+  const nSlots=nH*SPH;
   const STEP=1,N=Math.max(1,Math.round((eMax-eMin)/STEP)+1);
   const si=s=>Math.min(N-1,Math.max(0,Math.round((s-eMin)/STEP)));
   const sv=i=>eMin+i*STEP;
   const dp=Array.from({length:nSlots+1},()=>new Float64Array(N));
   const act=Array.from({length:nSlots},()=>new Uint8Array(N));
-  const avgP=prices.reduce((a,b)=>a+b,0)/prices.length;
-  // Auto-compute terminal value: stored energy is worth the spread between cheap and expensive hours
+  const avgP=prices.reduce((a,b)=>a+b,0)/nH;
+  // Auto-compute terminal value from price spread
   let tv=termVal;
-  if(tv===0){
+  if(tv===0&&nH>=2){
     const sorted=[...prices].sort((a,b)=>a-b);
-    const cheapAvg=sorted.slice(0,4).reduce((a,b)=>a+b,0)/4;
-    const dearAvg=sorted.slice(-4).reduce((a,b)=>a+b,0)/4;
-    tv=Math.max(0,(dearAvg-cheapAvg/rte)*0.4/avgP); // fraction of avg price, RTE-adjusted
+    const nQ=Math.max(1,Math.floor(nH/6));
+    const cheapAvg=sorted.slice(0,nQ).reduce((a,b)=>a+b,0)/nQ;
+    const dearAvg=sorted.slice(-nQ).reduce((a,b)=>a+b,0)/nQ;
+    const spread=Math.max(0,dearAvg-cheapAvg/rte);
+    tv=avgP>0?spread*0.25/avgP:0;
   }
   for(let i=0;i<N;i++){dp[nSlots][i]=avgP*((sv(i)-eMin)/100)*mwh*tv;}
   for(let t=nSlots-1;t>=0;t--){const p=subPrices[t];
@@ -162,24 +197,29 @@ function buildDaySch(prices,b,s0){
       dp[t][i]=bv;act[t][i]=ba;
     }
   }
-  // Forward pass at sub-hourly: build both execution (96-slot) and display (24-slot) schedules
-  const M=["H","C","D"],sch=Array(24).fill("H"),subSch=Array(nSlots).fill("H");
-  let s=Math.max(eMin,Math.min(eMax,s0)); // clamp starting SOC to effective range
-  for(let h=0;h<24;h++){
-    const votes=[0,0,0];
-    for(let q=0;q<SPH;q++){
-      const t=h*SPH+q;
-      const a=act[t][si(s)];
-      subSch[t]=M[a];
-      votes[a]++;
-      if(a===1)s=Math.min(eMax,s+Math.min(cP,eMax-s));
-      else if(a===2)s=Math.max(eMin,s-Math.min(dP,s-eMin));
-    }
-    if(votes[2]>=2)sch[h]="D";
-    else if(votes[1]>=2)sch[h]="C";
-    else sch[h]="H";
+  // Forward pass
+  const M=["H","C","D"],subSch=Array(nSlots).fill("H");
+  let s=Math.max(eMin,Math.min(eMax,s0));
+  for(let t=0;t<nSlots;t++){
+    const a=act[t][si(s)];
+    subSch[t]=M[a];
+    if(a===1)s=Math.min(eMax,s+Math.min(cP,eMax-s));
+    else if(a===2)s=Math.max(eMin,s-Math.min(dP,s-eMin));
   }
-  return{sch,subSch,endSoc:s};
+  return{subSch,endSoc:s};
+}
+
+// ── Build full-day schedule (24 hours) ──
+function buildDaySch(prices,b,s0){
+  const res=runDP(prices,b,s0);
+  // Derive hourly display schedule from majority vote of sub-hourly slots
+  const sch=Array(24).fill("H");
+  for(let h=0;h<24;h++){
+    const v=[0,0,0];
+    for(let q=0;q<SPH;q++)v[{H:0,C:1,D:2}[res.subSch[h*SPH+q]]||0]++;
+    if(v[2]>=2)sch[h]="D";else if(v[1]>=2)sch[h]="C";
+  }
+  return{sch,subSch:res.subSch,endSoc:res.endSoc};
 }
 
 function buildWeekSch(b,s0,sa,da,ca,priceMode){
@@ -190,59 +230,8 @@ function buildWeekSch(b,s0,sa,da,ca,priceMode){
   });return{week,subWeek};
 }
 
-// Re-optimize remaining hours from current SOC using sub-hourly DP.
-function buildPartialDaySch(existing,dayKey,fromH,curSoc,b,sa,da,ca,observedRT){
-  const{mwh,chgMW,disMW,rte,minSoc,maxSoc}=b;
-  const nH=24-fromH;if(nH<=0)return existing;
-  const rows=WEEK[dayKey].d;
-  const origFc=rows.map(([h,dam,rtm,sS,dS,cS])=>fcast(dam,rtm,sS,dS,cS,sa,da,ca));
-  let lastRT=null,lastObsH=-1;
-  Object.entries(observedRT).forEach(([h,rt])=>{const hr=Number(h);if(hr>=lastObsH){lastObsH=hr;lastRT=rt;}});
-  const prices=rows.map(([h],i)=>{
-    if(observedRT[h]!==undefined)return observedRT[h];
-    if(lastRT===null||lastObsH<0)return origFc[i];
-    const fcDelta=origFc[i]-origFc[lastObsH];
-    const anchored=lastRT+fcDelta;
-    const dist=h-lastObsH;
-    const blend=Math.min(1,dist/8);
-    return anchored*(1-blend)+origFc[i]*blend;
-  });
-  // Sub-hourly DP on remaining hours
-  const SPH=4,remPrices=prices.slice(fromH);
-  const subPrices=interpPrices(remPrices,SPH);
-  const nSlots=nH*SPH;
-  const cP=(chgMW*rte/mwh)*100/SPH,dP=(disMW/mwh)*100/SPH;
-  const STEP=1,N=Math.round((maxSoc-minSoc)/STEP)+1;
-  const si=s=>Math.min(N-1,Math.max(0,Math.round((s-minSoc)/STEP)));
-  const sv=i=>minSoc+i*STEP;
-  const dp=Array.from({length:nSlots+1},()=>new Float64Array(N));
-  const act=Array.from({length:nSlots},()=>new Uint8Array(N));
-  for(let t=nSlots-1;t>=0;t--){const p=subPrices[t];
-    for(let i=0;i<N;i++){const s=sv(i);
-      let bv=dp[t+1][i],ba=0;
-      const ca=Math.min(cP,maxSoc-s);
-      if(ca>0.3){const v=-p*((ca/100)*mwh/rte)+dp[t+1][si(s+ca)];if(v>bv){bv=v;ba=1;}}
-      const da=Math.min(dP,s-minSoc);
-      if(da>0.3){const v=p*((da/100)*mwh)+dp[t+1][si(s-da)];if(v>bv){bv=v;ba=2;}}
-      dp[t][i]=bv;act[t][i]=ba;
-    }
-  }
-  const M=["H","C","D"],newArr=[...existing];let s=curSoc;
-  for(let h=0;h<nH;h++){
-    const votes=[0,0,0];
-    for(let q=0;q<SPH;q++){const t=h*SPH+q;const a=act[t][si(s)];votes[a]++;
-      if(a===1)s=Math.min(maxSoc,s+Math.min(cP,maxSoc-s));
-      else if(a===2)s=Math.max(minSoc,s-Math.min(dP,s-minSoc));
-    }
-    if(votes[2]>=2)newArr[fromH+h]="D";
-    else if(votes[1]>=2)newArr[fromH+h]="C";
-    else newArr[fromH+h]="H";
-  }
-  return newArr;
-}
-
 function getRec(hour,rt,forecast,soc,mode,sigTh,b){
-  const sp=rt-forecast,vol=Math.max(Math.abs(forecast*.15),3),sig=sp/vol,abs=Math.abs(sig),{minSoc,maxSoc,floorMar=3,ceilMar=2}=b;
+  const sp=rt-forecast,vol=Math.max(Math.abs(forecast*.15),3),sig=sp/vol,abs=Math.abs(sig),{minSoc,maxSoc,floorMar=FLOOR_MAR,ceilMar=CEIL_MAR}=b;
   if(mode==="D"&&sig<-sigTh&&soc>minSoc+floorMar)return{mode:"HOLD",conf:Math.min(95,70+abs*8),reason:"Crowd compression: RT $"+rt.toFixed(0)+", "+abs.toFixed(1)+"\u03C3 below fc.",tag:"CROWD",tc:"#ef4444",ovr:true};
   if(mode==="H"&&sig>sigTh&&soc>minSoc+10&&hour>=14&&hour<=21)return{mode:"DISCHARGE",conf:Math.min(98,75+abs*10),reason:"Spike: RT $"+rt.toFixed(0)+", "+sig.toFixed(1)+"\u03C3 above fc.",tag:"SPIKE",tc:"#ef4444",ovr:true};
   if(mode==="C"&&rt>forecast*1.3&&hour>=14)return{mode:"HOLD",conf:65,reason:"RT elevated ($"+rt.toFixed(0)+"). Defer charge.",tag:"PRICE",tc:"#f59e0b",ovr:true};
@@ -317,12 +306,9 @@ export default function Dashboard(){
   const setStartSoc=useCallback(v=>{setStartSoc_(Math.max(minSoc,Math.min(maxSoc,v)));setBattPreset(null);},[minSoc,maxSoc]);
   const applyBP=useCallback((n,p)=>{setBattMW_(p.mw);setBattMWh_(p.mwh);setChgMW_(p.chgMW);setDisMW_(p.disMW);setRte(p.rte);setMinSoc_(p.minSoc);setMaxSoc_(p.maxSoc);setStartSoc_(s=>Math.max(p.minSoc,Math.min(p.maxSoc,s)));setBattPreset(n);},[]);
 
-  // RT Learn tuning parameters (must be before batt memo)
-  const [rlMinObs,setRlMinObs]=useState(3);
-  const [rlXdThresh,setRlXdThresh]=useState(4);
-  const [rlRebuildCad,setRlRebuildCad]=useState(4); // rebuild cadence in hours
+  // RT Learn tuning
+  const [rlRebuildCad,setRlRebuildCad]=useState(4);
   const [rlOpen,setRlOpen]=useState(false);
-  const [rlTickBuf,setRlTickBuf]=useState(2100); // tick buffer size (full week = ~2016)
 
   const batt=useMemo(()=>({mw:battMW,mwh:battMWh,chgMW,disMW,rte:rte/100,minSoc,maxSoc,floorMar:3,ceilMar:2,termVal:0}),[battMW,battMWh,chgMW,disMW,rte,minSoc,maxSoc]);
   const duration=battMWh/battMW;
@@ -338,19 +324,19 @@ export default function Dashboard(){
   const [supAcc,setSupAcc]=useState(85);
   const [demAcc,setDemAcc]=useState(75);
   const [crdAcc,setCrdAcc]=useState(70);
+  const [mktVol,setMktVol]=useState(25); // market volatility 0-100 (0=deterministic, 100=high noise)
   const [accP,setAccP]=useState("Ascend");
   const [hovH,setHovH]=useState(null);
 
   // ── Schedule state (shared across both tabs) ───────────────
   const subSchRef=useRef({}); // {dayName: Array(96)} sub-hourly execution schedule
+  const [subSchRev,setSubSchRev]=useState(0); // revision counter for triggering recalc
   const [sch,setSch]=useState(()=>{
     const ib={mw:40,mwh:80,chgMW:40,disMW:40,rte:0.87,minSoc:10,maxSoc:95};
     const r=buildWeekSch(ib,50,0,0,0,"dam");
     subSchRef.current=r.subWeek;
     return r.week;
   });
-  // Helper: expand hourly schedule to sub-hourly (4 slots per hour, same action)
-  const expandSub=(weekSch)=>{const sw={};DAYS.forEach(d=>{sw[d]=Array(96);for(let h=0;h<24;h++)for(let q=0;q<4;q++)sw[d][h*4+q]=weekSch[d][h];});return sw;};
   const [schP,setSchP]=useState("Naive");
   const [painting,setPainting]=useState(false);
   const [paintM,setPaintM]=useState(null);
@@ -397,28 +383,31 @@ export default function Dashboard(){
     setAlerts([]);setTlog([]);setRec(null);setManual(null);prevRT.current=null;setRtLearn(false);rtOptLastH.current=-1;learnedRef.current={};crossDayRef.current={};learnLastDay.current=-1;learnSeenRef.current=new Set();lastRebuildTime.current=-999;
   },[startSoc]);
 
-  // ── RT Learning: accumulate data every hour, rebuild schedule at day boundaries ──
-
+  // ── RT Learning ──────────────────────────────────────────────
   const learnAccumulate=useCallback(()=>{
     const lr=learnedRef.current;
     const xd=crossDayRef.current;
     const seen=learnSeenRef.current;
     for(let i=0;i<ticks.length;i++){
       const t=ticks[i];
-      const tid=t.day+t.time; // e.g. "Mon14:25" - unique per 5-min tick
+      const tid=t.day+t.time;
       if(seen.has(tid))continue;
       seen.add(tid);
+      // Use base hourly RTM (hrtm) for learning, not interpolated rt.
+      // The DP plans against hourly prices then interpolates internally,
+      // so learned prices must represent hourly settlement values.
+      const price=t.hrtm!==undefined?t.hrtm:t.rt;
       if(!lr[t.day])lr[t.day]={};
       if(!lr[t.day][t.hr])lr[t.day][t.hr]={sum:0,n:0};
-      lr[t.day][t.hr].sum+=t.rt;
+      lr[t.day][t.hr].sum+=price;
       lr[t.day][t.hr].n++;
       if(!xd[t.hr])xd[t.hr]={sum:0,n:0};
-      xd[t.hr].sum+=t.rt;
+      xd[t.hr].sum+=price;
       xd[t.hr].n++;
     }
   },[ticks]);
 
-  // Rebuild schedule (day boundary = full day, mid-day = remaining hours only)
+  // Rebuild schedule: partial-day DP for current day (from actual SOC), full-day for future
   const learnRebuild=useCallback((silent)=>{
     const dk=DAYS[simD];
     const lr=learnedRef.current;
@@ -427,63 +416,64 @@ export default function Dashboard(){
       const rows=WEEK[dayName].d;
       const dayLr=lr[dayName]||{};
       return rows.map(([h,dam,rtm,sS,dS,cS])=>{
-        if(dayLr[h]&&dayLr[h].n>=rlMinObs)return dayLr[h].sum/dayLr[h].n;
-        if(xd[h]&&xd[h].n>=rlMinObs)return xd[h].sum/xd[h].n;
         if(dayLr[h]&&dayLr[h].n>=1)return dayLr[h].sum/dayLr[h].n;
         if(xd[h]&&xd[h].n>=1)return xd[h].sum/xd[h].n;
         return fcast(dam,rtm,sS,dS,cS,supAcc,demAcc,crdAcc);
       });
     };
     const newSch={...sch};const newSubSch={...subSchRef.current};
-    const{mwh,chgMW:cMW,disMW:dMW,rte:rteV,minSoc:mn,maxSoc:mx,floorMar:fm=3,ceilMar:cm=2}=batt;
+    const{mwh,chgMW:cMW,disMW:dMW,rte:rteV,minSoc:mn,maxSoc:mx,floorMar:fm=FLOOR_MAR,ceilMar:cm=CEIL_MAR}=batt;
     const eMn=mn+fm,eMx=mx-cm;
-    let chainSoc=Math.max(eMn,Math.min(eMx,socRef.current));
-    const nXdHours=Object.values(xd).filter(v=>v.n>=rlMinObs).length;
+    const liveSoc=Math.max(eMn,Math.min(eMx,socRef.current));
     const startDayIdx=DAYS.indexOf(dk);
-    // Build current day: full DP then only write slots from current hour forward
     const curPrices=buildPrices24(dk);
-    const curRes=buildDaySch(curPrices,batt,chainSoc);
-    // Preserve past slots, overwrite future
-    const curSub=newSubSch[dk]||Array(96).fill("H");
-    const startSlot=simH*4;
-    for(let s=startSlot;s<96;s++)curSub[s]=curRes.subSch[s];
-    newSubSch[dk]=[...curSub];
-    const curHr=[...newSch[dk]];
-    for(let h=simH;h<24;h++){
-      const v=[0,0,0];
-      for(let q=0;q<4;q++)v[{H:0,C:1,D:2}[curSub[h*4+q]]||0]++;
-      if(v[2]>=2)curHr[h]="D";else if(v[1]>=2)curHr[h]="C";else curHr[h]="H";
-    }
-    newSch[dk]=curHr;
-    // Compute chain SOC from actual remaining slots
-    const cP4=(cMW*rteV/mwh)*100/4,dP4=(dMW/mwh)*100/4;
-    let futSoc=chainSoc;
-    for(let s=startSlot;s<96;s++){
-      if(curSub[s]==="C")futSoc=Math.min(eMx,futSoc+Math.min(cP4,eMx-futSoc));
-      else if(curSub[s]==="D")futSoc=Math.max(eMn,futSoc-Math.min(dP4,futSoc-eMn));
-    }
-    chainSoc=futSoc;
-    // Rebuild future days when we have cross-day data
-    if(nXdHours>=rlXdThresh){
-      for(let di=1;di<7;di++){
-        const futDay=DAYS[(startDayIdx+di)%7];
-        const fp=buildPrices24(futDay);
-        const res=buildDaySch(fp,batt,chainSoc);
-        newSch[futDay]=[...res.sch];
-        newSubSch[futDay]=res.subSch;
-        chainSoc=res.endSoc;
+    const cP=(cMW*rteV/mwh)*100/SPH,dP=(dMW/mwh)*100/SPH;
+
+    // CURRENT DAY: partial DP from simH forward using actual live SOC
+    const nRemH=24-simH;
+    if(nRemH>0){
+      const remPrices=curPrices.slice(simH);
+      const res=runDP(remPrices,batt,liveSoc);
+      // Graft partial result onto existing schedule
+      const curSub=newSubSch[dk]?[...newSubSch[dk]]:Array(96).fill("H");
+      const startSlot=simH*SPH;
+      for(let t=0;t<nRemH*SPH;t++)curSub[startSlot+t]=res.subSch[t];
+      newSubSch[dk]=[...curSub];
+      const curHr=[...newSch[dk]];
+      for(let h=simH;h<24;h++){
+        const v=[0,0,0];
+        for(let q=0;q<SPH;q++)v[{H:0,C:1,D:2}[curSub[h*4+q]]||0]++;
+        if(v[2]>=2)curHr[h]="D";else if(v[1]>=2)curHr[h]="C";else curHr[h]="H";
       }
+      newSch[dk]=curHr;
     }
-    setSch(newSch);subSchRef.current=newSubSch;
+    // Chain SOC: simulate remaining current-day sub-slots from live SOC
+    let chainSoc=liveSoc;
+    const curSub=newSubSch[dk]||Array(96).fill("H");
+    for(let s=simH*SPH;s<96;s++){
+      if(curSub[s]==="C")chainSoc=Math.min(eMx,chainSoc+Math.min(cP,eMx-chainSoc));
+      else if(curSub[s]==="D")chainSoc=Math.max(eMn,chainSoc-Math.min(dP,chainSoc-eMn));
+    }
+    // FUTURE DAYS: always rebuild using learned + forecast fallback
+    for(let di=1;di<7;di++){
+      const futDay=DAYS[(startDayIdx+di)%7];
+      const fp=buildPrices24(futDay);
+      const res=buildDaySch(fp,batt,chainSoc);
+      newSch[futDay]=[...res.sch];
+      newSubSch[futDay]=res.subSch;
+      chainSoc=res.endSoc;
+    }
+    setSch(newSch);subSchRef.current=newSubSch;setSubSchRev(v=>v+1);
     setSchP("RT Learn");setManual(null);
     learnLastDay.current=simD;
     if(!silent){
       const dayLr=lr[dk]||{};
       const nObs=Object.keys(dayLr).filter(h=>dayLr[h].n>=1).length;
+      const nXd=Object.values(xd).filter(v=>v.n>=1).length;
       setAlerts(prev=>[{id:Date.now(),time:DAYS[simD]+" "+String(simH).padStart(2,"0")+":"+String(simM).padStart(2,"0"),
-        tag:"RT LEARN",tc:"#a855f7",msg:"Rebuilt from hr "+simH+". "+dk+": "+nObs+"/24 obs, "+nXdHours+"/24 cross-day."},...prev]);
+        tag:"RT LEARN",tc:"#a855f7",msg:"Rebuilt from hr "+simH+". "+dk+": "+nObs+"/24 obs, "+nXd+"/24 cross-day."},...prev]);
     }
-  },[simD,simH,simM,sch,batt,supAcc,demAcc,crdAcc,rlMinObs,rlXdThresh]);
+  },[simD,simH,simM,sch,batt,supAcc,demAcc,crdAcc]);
 
   const toggleRtLearn=useCallback(()=>{
     if(rtLearn){setRtLearn(false);rtOptLastH.current=-1;learnLastDay.current=-1;lastRebuildTime.current=-999;return;}
@@ -527,38 +517,37 @@ export default function Dashboard(){
     const nDay=Object.keys(dayLr).filter(h=>dayLr[h].n>=1).length;
     if(nXd<2&&nDay<2)return null;
     return fcs.map((f,h)=>{
-      if(dayLr[h]&&dayLr[h].n>=rlMinObs)return dayLr[h].sum/dayLr[h].n;
-      if(xd[h]&&xd[h].n>=rlMinObs)return xd[h].sum/xd[h].n;
       if(dayLr[h]&&dayLr[h].n>=1)return dayLr[h].sum/dayLr[h].n;
       if(xd[h]&&xd[h].n>=1)return xd[h].sum/xd[h].n;
       return f.fc;
     });
-  },[rtLearn,ticks,selDay,fcs,rlMinObs]);
+  },[rtLearn,ticks,selDay,fcs]);
   const socTraj=useMemo(()=>{
-    const ds=daySoc(sch,selDay,batt,startSoc);
+    const ds=daySoc(sch,selDay,batt,startSoc,subSchRef.current);
     return calcSOCTraj(sch,selDay,batt,ds);
-  },[sch,selDay,batt,startSoc]);
+  },[sch,selDay,batt,startSoc,subSchRev]);
   const clipN=socTraj.filter(t=>t.clip).length;
 
-  // Revenue benchmarks -- each uses chained SOC for the selected day
+  // Revenue benchmarks -- each uses sub-hourly for accurate calculation
   const naiveSchR=useMemo(()=>buildWeekSch(batt,startSoc,0,0,0,"dam"),[batt,startSoc]);
   const naiveSch=naiveSchR.week;
   const naiveSubSch=naiveSchR.subWeek;
-  const optSchR=useMemo(()=>buildWeekSch(batt,startSoc,supAcc,demAcc,crdAcc,"fc"),[batt,startSoc,supAcc,demAcc,crdAcc]);
-  const optSch=optSchR.week;
   const revNaive=useMemo(()=>{
-    const ds=daySoc(naiveSch,selDay,batt,startSoc);
-    return calcRev(naiveSch,selDay,batt,100,100,100,"rtm",ds);
-  },[naiveSch,selDay,batt,startSoc]);
+    const ds=daySoc(naiveSch,selDay,batt,startSoc,naiveSubSch);
+    return calcRev(naiveSch,selDay,batt,100,100,100,"rtm",ds,naiveSubSch);
+  },[naiveSch,naiveSubSch,selDay,batt,startSoc]);
   const revYours=useMemo(()=>{
-    const ds=daySoc(sch,selDay,batt,startSoc);
-    return calcRev(sch,selDay,batt,100,100,100,"rtm",ds);
-  },[sch,selDay,batt,startSoc]);
-  const perfSch=useMemo(()=>{const w={};let s=startSoc;DAYS.forEach(d=>{const r=buildDaySch(WEEK[d].d.map(r=>r[2]),batt,s);w[d]=r.sch;s=r.endSoc;});return w;},[batt,startSoc]);
+    const subW=subSchRef.current;
+    const ds=daySoc(sch,selDay,batt,startSoc,subW);
+    return calcRev(sch,selDay,batt,100,100,100,"rtm",ds,subW);
+  },[sch,selDay,batt,startSoc,subSchRev]);
+  const perfSchR=useMemo(()=>{const w={},sw={};let s=startSoc;DAYS.forEach(d=>{const r=buildDaySch(WEEK[d].d.map(r=>r[2]),batt,s);w[d]=r.sch;sw[d]=r.subSch;s=r.endSoc;});return{week:w,subWeek:sw};},[batt,startSoc]);
+  const perfSch=perfSchR.week;
+  const perfSubSch=perfSchR.subWeek;
   const revPerf=useMemo(()=>{
-    const ds=daySoc(perfSch,selDay,batt,startSoc);
-    return calcRev(perfSch,selDay,batt,100,100,100,"rtm",ds);
-  },[perfSch,selDay,batt,startSoc]);
+    const ds=daySoc(perfSch,selDay,batt,startSoc,perfSubSch);
+    return calcRev(perfSch,selDay,batt,100,100,100,"rtm",ds,perfSubSch);
+  },[perfSch,perfSubSch,selDay,batt,startSoc]);
 
   // ── Paint ──────────────────────────────────────────────────
   const cellDn=useCallback((d,h)=>{const c=sch[d][h],n=MCYC[c];setPaintM(n);setPainting(true);setSch(p=>{const cp={...p};cp[d]=[...cp[d]];cp[d][h]=n;return cp;});
@@ -579,9 +568,21 @@ export default function Dashboard(){
         if(ha)setSimH(ph=>{let nh=ph+1;if(nh>=24){nh=0;setSimD(pd=>(pd+1)%7);}return nh;});
         setSimD(cd=>{setSimH(ch=>{
           const hr=ch,dn=DAYS[cd],row=WEEK[dn].d[hr],[,dam,rtm,sS,dS,cS]=row;
-          const fcV=fcast(dam,rtm,sS,dS,cS,supAcc,demAcc,crdAcc);
-          const noise=gauss()*Math.max(Math.abs(rtm*.12),2)*.25;
-          const rt=Math.max(-5,(prevRT.current!==null?prevRT.current*.3+rtm*.7:rtm)+noise);
+          // Sub-hourly price interpolation: cosine blend between current and next hour
+          const frac=nm/60;
+          const nextHr=Math.min(23,hr+1);
+          const nRow=WEEK[dn].d[nextHr];
+          const mu=(1-Math.cos(frac*Math.PI))/2;
+          const subRtm=rtm*(1-mu)+nRow[2]*mu;
+          const subDam=dam*(1-mu)+nRow[1]*mu;
+          const subSS=sS*(1-mu)+nRow[3]*mu;
+          const subDS=dS*(1-mu)+nRow[4]*mu;
+          const subCS=cS*(1-mu)+nRow[5]*mu;
+          const fcV=fcast(subDam,subRtm,subSS,subDS,subCS,supAcc,demAcc,crdAcc);
+          const volScale=mktVol/100;
+          const noise=gauss()*Math.max(Math.abs(subRtm*.12),2)*0.25*volScale;
+          const blend=volScale>0?0.3*volScale:0;
+          const rt=Math.max(-5,(prevRT.current!==null?prevRT.current*blend+subRtm*(1-blend):subRtm)+noise);
           prevRT.current=rt;
           const sm=sch[dn][hr];
           // Sub-hourly execution: read 15-min slot
@@ -603,11 +604,12 @@ export default function Dashboard(){
             em=manual||r.mode;
           }
           setRec(r);
-          // Execute using live SOC ref
+          // Execute using live SOC ref with effective bounds matching DP
+          const eMinRT=minSoc+3,eMaxRT=maxSoc-2;
           let pD=0,sD=0;
-          if(em==="DISCHARGE"&&liveSoc>minSoc+1){const a=Math.min(dpt,liveSoc-minSoc-1);if(a>0.01){pD=rt*(a/100)*battMWh;sD=-a;}}
-          else if(em==="CHARGE"&&liveSoc<maxSoc-1){const a=Math.min(cpt,maxSoc-1-liveSoc);if(a>0.01){pD=-(rt*(a/100)*battMWh/rD);sD=a;}}
-          const newSoc=Math.max(minSoc,Math.min(maxSoc,liveSoc+sD));
+          if(em==="DISCHARGE"&&liveSoc>eMinRT){const a=Math.min(dpt,liveSoc-eMinRT);if(a>0.01){pD=rt*(a/100)*battMWh;sD=-a;}}
+          else if(em==="CHARGE"&&liveSoc<eMaxRT){const a=Math.min(cpt,eMaxRT-liveSoc);if(a>0.01){pD=-(rt*(a/100)*battMWh/rD);sD=a;}}
+          const newSoc=Math.max(eMinRT,Math.min(eMaxRT,liveSoc+sD));
           socRef.current=newSoc; // update ref synchronously
           setUPnl(p=>p+pD);setSoc(newSoc);
           // Naive baseline P&L using live ref
@@ -617,18 +619,18 @@ export default function Dashboard(){
           const naiveMode0={C:"CHARGE",D:"DISCHARGE",H:"HOLD"}[naiveAction]||"HOLD";
           const naiveMode=(naiveMode0==="DISCHARGE"&&liveSSoc<=minSoc+3)?"HOLD":(naiveMode0==="CHARGE"&&liveSSoc>=maxSoc-2)?"HOLD":naiveMode0;
           let sp2=0,sd2=0;
-          if(naiveMode==="DISCHARGE"&&liveSSoc>minSoc+1){const a=Math.min(dpt,liveSSoc-minSoc-1);if(a>0.01){sp2=rt*(a/100)*battMWh;sd2=-a;}}
-          else if(naiveMode==="CHARGE"&&liveSSoc<maxSoc-1){const a=Math.min(cpt,maxSoc-1-liveSSoc);if(a>0.01){sp2=-(rt*(a/100)*battMWh/rD);sd2=a;}}
-          const newSSoc=Math.max(minSoc,Math.min(maxSoc,liveSSoc+sd2));
+          if(naiveMode==="DISCHARGE"&&liveSSoc>eMinRT){const a=Math.min(dpt,liveSSoc-eMinRT);if(a>0.01){sp2=rt*(a/100)*battMWh;sd2=-a;}}
+          else if(naiveMode==="CHARGE"&&liveSSoc<eMaxRT){const a=Math.min(cpt,eMaxRT-liveSSoc);if(a>0.01){sp2=-(rt*(a/100)*battMWh/rD);sd2=a;}}
+          const newSSoc=Math.max(eMinRT,Math.min(eMaxRT,liveSSoc+sd2));
           sSocRef.current=newSSoc;
           setSPnl(p=>p+sp2);setSSoc(newSSoc);
           const ts=String(hr).padStart(2,"0")+":"+String(nm).padStart(2,"0");
-          setTicks(p=>[...p,{hr,mn:nm,time:ts,day:dn,dam,rtm,fv:Math.round(fcV*10)/10,rt:Math.round(rt*10)/10,sp:Math.round((rt-fcV)*10)/10,um:em,sm}].slice(-rlTickBuf));
+          setTicks(p=>[...p,{hr,mn:nm,time:ts,day:dn,dam:Math.round(subDam*10)/10,rtm:Math.round(subRtm*10)/10,hrtm:rtm,fv:Math.round(fcV*10)/10,rt:Math.round(rt*10)/10,sp:Math.round((rt-fcV)*10)/10,um:em,sm}].slice(-2100));
           if(r.tag)setAlerts(p=>[{time:dn+" "+ts,tag:r.tag,tc:r.tc,msg:r.reason,id:Date.now()},...p].slice(0,20));
           setTlog(p=>{const l=p[0];if(!l||l.mode!==em)return[{time:dn+" "+ts,mode:em,rt:Math.round(rt*10)/10,soc:Math.round(newSoc*10)/10,ovr:!!manual||r.ovr,id:Date.now()},...p].slice(0,40);return p;});
           return ch;});return cd;});return nm;});
     },speed);return()=>clearInterval(tickRef.current);
-  },[running,speed,sigTh,soc,sSoc,sch,schP,naiveSch,naiveSubSch,manual,rtLearn,supAcc,demAcc,crdAcc,batt,battMWh,chgMW,disMW,rte,minSoc,maxSoc,rlTickBuf]);
+  },[running,speed,sigTh,sch,schP,naiveSch,naiveSubSch,manual,rtLearn,supAcc,demAcc,crdAcc,mktVol,batt,minSoc,maxSoc]);
 
   const last=ticks[ticks.length-1];
   const eMode=manual||(rec?rec.mode:"HOLD");
@@ -636,7 +638,14 @@ export default function Dashboard(){
   // ── Chart data ─────────────────────────────────────────────
   const CW=540,CH=155,PD={t:14,r:10,b:20,l:36},pW=CW-PD.l-PD.r,pH=CH-PD.t-PD.b;
   const cp=useMemo(()=>{
-    const av=fcs.flatMap(f=>[f.dam,f.rtm,f.fc]);
+    const volScale=mktVol/100;
+    // Uncertainty band around FORECAST: forecast error + market noise
+    const bandW=fcs.map(f=>{
+      const fcErr=Math.abs(f.rtm-f.fc);
+      const noise=Math.max(Math.abs(f.rtm*0.12),2)*0.25*volScale*3.5;
+      return fcErr+noise;
+    });
+    const av=fcs.flatMap((f,i)=>[f.dam,f.fc+bandW[i],f.fc-bandW[i],f.rtm]);
     if(rtBiasFcs)rtBiasFcs.forEach(v=>av.push(v));
     const yMn=Math.min(...av)-3,yMx=Math.max(...av)+3,yR=yMx-yMn||1;
     const x=i=>PD.l+(i/23)*pW,y=v=>PD.t+pH-((v-yMn)/yR)*pH;
@@ -644,10 +653,16 @@ export default function Dashboard(){
     const rP=fcs.map((f,i)=>(i?'L':'M')+x(i)+','+y(f.rtm)).join('');
     const fP=fcs.map((f,i)=>(i?'L':'M')+x(i)+','+y(f.fc)).join('');
     const bP=rtBiasFcs?rtBiasFcs.map((v,i)=>(i?'L':'M')+x(i)+','+y(v)).join(''):null;
+    let volBand=null;
+    if(bandW.some(w=>w>0.5)){
+      const upper=fcs.map((f,i)=>(i?'L':'M')+x(i)+','+y(f.fc+bandW[i])).join('');
+      const lower=fcs.slice().reverse().map((f,i)=>{const j=23-i;return'L'+x(j)+','+y(fcs[j].fc-bandW[j]);}).join('');
+      volBand=upper+lower+'Z';
+    }
     const gap=fcs.map((f,i)=>({i,x:x(i),u:y(Math.max(f.fc,f.rtm)),lo:y(Math.min(f.fc,f.rtm)),f:f.fc>f.rtm?"#3b82f6":"#ef4444"}));
     const yT=[];const st=yR>120?30:yR>60?15:yR>30?10:5;for(let v=Math.ceil(yMn/st)*st;v<=yMx;v+=st)yT.push({v,py:y(v)});
-    return{dP,rP,fP,bP,gap,yT,x,y,sch:sch[selDay]};
-  },[fcs,sch,selDay,rtBiasFcs]);
+    return{dP,rP,fP,bP,volBand,bandW,gap,yT,x,y,sch:sch[selDay]};
+  },[fcs,sch,selDay,rtBiasFcs,mktVol]);
   const rtC=useMemo(()=>{
     if(ticks.length<2)return null;const vis=ticks.slice(-80),av=vis.flatMap(t=>[t.fv,t.rt]);
     const yMn=Math.min(...av)-3,yMx=Math.max(...av)+3,yR=yMx-yMn||1;
@@ -667,9 +682,9 @@ export default function Dashboard(){
   // ── Shared schedule action buttons ─────────────────────────
   const SchBtns=()=>{const bs={flex:1,minWidth:0,borderRadius:3,cursor:"pointer",fontFamily:"inherit",fontSize:f(8),fontWeight:600,padding:"3px 0",textAlign:"center"};return(
     <div style={{display:"flex",gap:2,minWidth:0}}>
-      <button title="Schedule using day-ahead market prices only. No forecast intelligence." onClick={()=>{const r=buildWeekSch(batt,startSoc,0,0,0,"dam");setSch(r.week);subSchRef.current=r.subWeek;setSchP("Naive");setRtLearn(false);}} style={{...bs,border:schP==="Naive"?"1px solid #94a3b8":"1px solid #1a2744",background:schP==="Naive"?"#94a3b820":"#0d1a2e",color:schP==="Naive"?"#94a3b8":"#4a6a8a"}}>Naive</button>
-      <button title="Optimize schedule using supply, demand, and crowd forecasts via dynamic programming." onClick={()=>{const r=buildWeekSch(batt,startSoc,supAcc,demAcc,crdAcc,"fc");setSch(r.week);subSchRef.current=r.subWeek;setSchP("Optimized");setRtLearn(false);}} style={{...bs,border:schP==="Optimized"?"1px solid #22c55e":"1px solid #1a2744",background:schP==="Optimized"?"#22c55e20":"#0d1a2e",color:schP==="Optimized"?"#22c55e":"#4a6a8a"}}>{"\u2728"} Optimize</button>
-      <button title="Clear all scheduled actions to HOLD." onClick={()=>{setSch(p=>{const c={...p};DAYS.forEach(d=>{c[d]=Array(24).fill("H");});return c;});subSchRef.current={};DAYS.forEach(d=>{subSchRef.current[d]=Array(96).fill("H");});setSchP("Clear");setRtLearn(false);}} style={{...bs,border:schP==="Clear"?"1px solid #60a5fa":"1px solid #1a2744",background:schP==="Clear"?"#3b82f620":"#0d1a2e",color:schP==="Clear"?"#60a5fa":"#4a6a8a"}}>Clear</button>
+      <button title="Schedule using day-ahead market prices only. No forecast intelligence." onClick={()=>{const r=buildWeekSch(batt,startSoc,0,0,0,"dam");setSch(r.week);subSchRef.current=r.subWeek;setSubSchRev(v=>v+1);setSchP("Naive");setRtLearn(false);}} style={{...bs,border:schP==="Naive"?"1px solid #94a3b8":"1px solid #1a2744",background:schP==="Naive"?"#94a3b820":"#0d1a2e",color:schP==="Naive"?"#94a3b8":"#4a6a8a"}}>Naive</button>
+      <button title="Optimize schedule using supply, demand, and crowd forecasts via dynamic programming." onClick={()=>{const r=buildWeekSch(batt,startSoc,supAcc,demAcc,crdAcc,"fc");setSch(r.week);subSchRef.current=r.subWeek;setSubSchRev(v=>v+1);setSchP("Optimized");setRtLearn(false);}} style={{...bs,border:schP==="Optimized"?"1px solid #22c55e":"1px solid #1a2744",background:schP==="Optimized"?"#22c55e20":"#0d1a2e",color:schP==="Optimized"?"#22c55e":"#4a6a8a"}}>{"\u2728"} Optimize</button>
+      <button title="Clear all scheduled actions to HOLD." onClick={()=>{setSch(p=>{const c={...p};DAYS.forEach(d=>{c[d]=Array(24).fill("H");});return c;});subSchRef.current={};DAYS.forEach(d=>{subSchRef.current[d]=Array(96).fill("H");});setSubSchRev(v=>v+1);setSchP("Clear");setRtLearn(false);}} style={{...bs,border:schP==="Clear"?"1px solid #60a5fa":"1px solid #1a2744",background:schP==="Clear"?"#3b82f620":"#0d1a2e",color:schP==="Clear"?"#60a5fa":"#4a6a8a"}}>Clear</button>
     </div>);
   };
 
@@ -723,8 +738,8 @@ export default function Dashboard(){
         {socTraj.map((t,h)=>(
           <div key={h} style={{height:cellH,display:"flex",alignItems:"center",gap:1,margin:"0.5px 0"}}>
             <div style={{flex:1,height:mob?8:6,background:"#0d1a2e",borderRadius:2,overflow:"hidden",position:"relative"}}>
-              <div style={{position:"absolute",left:minSoc+"%",top:0,width:1,height:"100%",background:"#ef444440"}}/>
-              <div style={{position:"absolute",left:maxSoc+"%",top:0,width:1,height:"100%",background:"#22c55e40"}}/>
+              <div style={{position:"absolute",left:(minSoc+3)+"%",top:0,width:1,height:"100%",background:"#ef444440"}}/>
+              <div style={{position:"absolute",left:(maxSoc-2)+"%",top:0,width:1,height:"100%",background:"#22c55e40"}}/>
               <div style={{height:"100%",width:t.soc+"%",borderRadius:2,background:t.clipHi?"#22c55e":t.clipLo?"#ef4444":t.soc>60?"#22c55e50":t.soc>30?"#f59e0b50":"#ef444450"}}/>
             </div>
             <span style={{fontSize:f(7),color:t.clipHi?"#22c55e":t.clipLo?"#ef4444":"#3a5a7a",fontWeight:t.clip?700:400,width:mob?22:18,textAlign:"right"}}>{t.soc.toFixed(0)}</span>
@@ -797,15 +812,6 @@ export default function Dashboard(){
                   <span style={{fontSize:f(7),fontWeight:700,color:"#f59e0b",letterSpacing:".08em"}}>LEARNING SETTINGS</span>
                 </div>
                 {rlOpen&&<div style={{marginTop:3,padding:"4px 0",borderTop:"1px solid #f59e0b15"}}>
-                  <div title="How many 5-minute price observations per hour before the system trusts the learned price over the forecast. At 1, a single tick immediately overrides the forecast (fast but noisy, one outlier can mislead). At 6, half an hour of data is needed (slower to learn but more stable averages). For volatile markets use 3-4, for stable patterns use 1-2.">
-                    <NumField label="Min Obs" value={rlMinObs} setValue={v=>setRlMinObs(Math.max(1,Math.min(12,Math.round(v))))} min={1} max={12} step={1} unit="tks" color="#f59e0b"/>
-                  </div>
-                  <div title="How many hours of cross-day data (observed across all days) are needed before the system will rebuild future day schedules. At 1, even one observed hour unlocks future-day optimization (aggressive). At 12, half a day of cross-day coverage is required (conservative). Lower means faster adaptation but noisier future schedules.">
-                    <NumField label="XDay Gate" value={rlXdThresh} setValue={v=>setRlXdThresh(Math.max(1,Math.min(24,Math.round(v))))} min={1} max={24} step={1} unit="hrs" color="#f59e0b"/>
-                  </div>
-                  <div title="Maximum number of price ticks stored in memory. Each tick is a 5-minute observation. 288 ticks = 1 day, 2016 = full week. More ticks means more cross-day data for every hour, improving learned price accuracy. At 600 (~2 days), early-week data is lost by Thursday. At 2100 (full week), all 7 days of observations persist, giving each hour 7+ data points for averaging. Memory cost is trivial (~400KB).">
-                    <NumField label="Tick Buffer" value={rlTickBuf} setValue={v=>setRlTickBuf(Math.max(288,Math.min(3000,Math.round(v/100)*100)))} min={288} max={3000} step={100} unit="tks" color="#f59e0b"/>
-                  </div>
                   <div title="How often the system rebuilds the trading schedule using learned price data. 24hr = once per day at midnight (most stable, least adaptive). 4hr = six times daily (good balance). 1hr = every hour (very adaptive, some churn). 15min = every quarter hour (maximum adaptation, mirrors real-time trading desk behavior). More frequent rebuilds capture intraday price shifts faster but may cause schedule instability.">
                     <div style={{fontSize:f(7),color:"#3a5a7a",fontWeight:700,letterSpacing:".06em",marginBottom:2,marginTop:4}}>REBUILD CADENCE</div>
                     <div style={{display:"flex",flexWrap:"wrap",gap:2}}>
@@ -819,18 +825,18 @@ export default function Dashboard(){
             </div>
           </div>
           {/* State of Charge */}
-          <div title={"Current battery energy level. Red/yellow markers show min/max SOC bounds. Charging increases SOC, discharging decreases it. Current: "+soc.toFixed(0)+"% = "+((soc/100)*battMWh).toFixed(0)+"MWh of "+battMWh+"MWh."} style={P}>
+          <div title={"Current battery energy level. Red/green markers show effective operating SOC bounds (including safety buffers). Current: "+soc.toFixed(0)+"% = "+((soc/100)*battMWh).toFixed(0)+"MWh of "+battMWh+"MWh."} style={P}>
             <div style={LB}>STATE OF CHARGE (SoC)</div>
             <div style={{position:"relative",height:18,background:"#0d1a2e",borderRadius:3,overflow:"hidden",border:"1px solid #1a2744"}}>
-              <div style={{position:"absolute",left:minSoc+"%",top:0,width:1,height:"100%",background:"#ef444460",zIndex:1}}/>
-              <div style={{position:"absolute",left:maxSoc+"%",top:0,width:1,height:"100%",background:"#22c55e60",zIndex:1}}/>
+              <div style={{position:"absolute",left:(minSoc+3)+"%",top:0,width:1,height:"100%",background:"#ef444460",zIndex:1}}/>
+              <div style={{position:"absolute",left:(maxSoc-2)+"%",top:0,width:1,height:"100%",background:"#22c55e60",zIndex:1}}/>
               <div style={{position:"absolute",left:0,top:0,height:"100%",width:soc+"%",borderRadius:3,background:(soc>=maxSoc-2?"#22c55e":soc>60?"#22c55e":soc>30?"#f59e0b":"#ef4444")+"50",transition:"width .4s"}}/>
               <div style={{position:"absolute",width:"100%",textAlign:"center",fontSize:f(9),fontWeight:800,lineHeight:"18px",color:soc>=maxSoc-2?"#22c55e":soc>60?"#22c55e":soc>30?"#f59e0b":"#ef4444",zIndex:2}}>{soc.toFixed(0)}%</div>
             </div>
             <div style={{display:"flex",justifyContent:"space-between",marginTop:3}}>
-              <span style={{fontSize:f(7),color:"#ef4444"}}>{minSoc}% min</span>
+              <span style={{fontSize:f(7),color:"#ef4444"}}>{minSoc+3}% floor</span>
               <span style={{fontSize:f(7),color:"#3a5a7a",fontWeight:600}}>{((soc/100)*battMWh).toFixed(0)} / {battMWh} MWh</span>
-              <span style={{fontSize:f(7),color:"#22c55e"}}>{maxSoc}% max</span>
+              <span style={{fontSize:f(7),color:"#22c55e"}}>{maxSoc-2}% ceil</span>
             </div>
           </div>
           {/* P&L */}
@@ -842,7 +848,7 @@ export default function Dashboard(){
                 <div style={{width:1,height:24,background:"#1a2744"}}/>
                 <div style={{textAlign:"center"}}><div style={{fontSize:f(12),fontWeight:800,color:sPnl>=0?"#22c55e":"#ef4444"}}>${sPnl.toFixed(0)}</div><div style={{fontSize:f(7),color:"#94a3b8",fontWeight:600}}>NAIVE</div></div>
               </div>
-              {ticks.length>10&&<div style={{textAlign:"center",fontSize:f(8),marginTop:2,color:uPnl>=sPnl?"#22c55e":"#ef4444",fontWeight:600}}>{uPnl>=sPnl?"\u25B2 +$"+(uPnl-sPnl).toFixed(0)+" vs Naive":"\u25BC -$"+(sPnl-uPnl).toFixed(0)+" vs Naive"}</div>}
+              {ticks.length>10&&(()=>{const d=uPnl-sPnl,pct=Math.abs(sPnl)>1?((d/Math.abs(sPnl))*100):0;return(<div style={{textAlign:"center",fontSize:f(8),marginTop:2,color:d>=0?"#22c55e":"#ef4444",fontWeight:600}}>{d>=0?"\u25B2 +$"+d.toFixed(0):"\u25BC -$"+(-d).toFixed(0)}{Math.abs(pct)>=0.1?" ("+(d>=0?"+":"")+pct.toFixed(1)+"%)":""} vs Naive</div>);})()}
             </div>:<div>
               <div style={LB}>P&L: FLEET ({fleetN} UNITS)</div>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"2px 0"}}>
@@ -862,7 +868,7 @@ export default function Dashboard(){
                 <span style={{fontSize:f(7),color:"#94a3b8",fontWeight:600}}>Naive (fleet)</span>
                 <span style={{fontSize:f(12),fontWeight:800,color:sPnl>=0?"#22c55e":"#ef4444"}}>{fmtDol(sPnl*fleetN)}</span>
               </div>
-              {ticks.length>10&&<div style={{textAlign:"center",fontSize:f(8),marginTop:4,paddingTop:4,borderTop:"1px solid #1a2744",color:uPnl>=sPnl?"#22c55e":"#ef4444",fontWeight:600}}>{uPnl>=sPnl?"\u25B2 +"+fmtDol((uPnl-sPnl)*fleetN)+" vs Naive":"\u25BC -"+fmtDol((sPnl-uPnl)*fleetN)+" vs Naive"}</div>}
+              {ticks.length>10&&(()=>{const d=(uPnl-sPnl)*fleetN,pct=Math.abs(sPnl)>1?((uPnl-sPnl)/Math.abs(sPnl)*100):0;return(<div style={{textAlign:"center",fontSize:f(8),marginTop:4,paddingTop:4,borderTop:"1px solid #1a2744",color:d>=0?"#22c55e":"#ef4444",fontWeight:600}}>{d>=0?"\u25B2 +"+fmtDol(d):"\u25BC -"+fmtDol(-d)}{Math.abs(pct)>=0.1?" ("+(d>=0?"+":"")+pct.toFixed(1)+"%)":""} vs Naive</div>);})()}
             </div>}
           </div>
           {/* Revenue */}
@@ -942,7 +948,7 @@ export default function Dashboard(){
             <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:8}}>
               <div style={{textAlign:"center"}}><div style={{fontSize:f(9),fontWeight:800,color:MC[eMode]||"#94a3b8",lineHeight:1}}>{eMode}</div><div style={{fontSize:f(7),color:"#4a6a8a"}}>MODE</div></div>
               <div style={{textAlign:"center"}}><div style={{fontSize:f(9),fontWeight:800,color:soc>60?"#22c55e":soc>30?"#f59e0b":"#ef4444",lineHeight:1}}>{soc.toFixed(0)}%</div><div style={{fontSize:f(7),color:"#4a6a8a"}}>SOC</div></div>
-              <div style={{textAlign:"center"}}><div style={{fontSize:f(9),fontWeight:800,color:uPnl>=sPnl?"#22c55e":"#ef4444",lineHeight:1}}>{uPnl>=sPnl?"+":""}{(uPnl-sPnl).toFixed(0)}</div><div style={{fontSize:f(7),color:"#4a6a8a"}}>vs NAV</div></div>
+              <div style={{textAlign:"center"}}><div style={{fontSize:f(9),fontWeight:800,color:uPnl>=sPnl?"#22c55e":"#ef4444",lineHeight:1}}>{uPnl>=sPnl?"+":""}{(uPnl-sPnl).toFixed(0)}{Math.abs(sPnl)>1?" ("+(((uPnl-sPnl)/Math.abs(sPnl))*100).toFixed(0)+"%)":""}</div><div style={{fontSize:f(7),color:"#4a6a8a"}}>vs NAV</div></div>
             </div>
           </div>}
           {/* Day tabs */}
@@ -965,7 +971,7 @@ export default function Dashboard(){
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
               <div style={LB}>{dayD.label} PRICE CURVES</div>
               <div style={{display:"flex",gap:10}}>
-                {[{l:"DAM",c:"#94a3b8",d:true,tip:"Day-Ahead Market price. Set the prior day. Dashed line."},{l:"Forecast",c:"#f59e0b",tip:"System's blended forecast using supply, demand, and crowd signals at your accuracy settings."},
+                {[{l:"DAM",c:"#94a3b8",d:true,tip:"Day-Ahead Market price. Set the prior day. Dashed line."},{l:"Forecast",c:"#f59e0b",tip:"System's blended forecast using supply, demand, and crowd signals at your accuracy settings."+(mktVol>0||supAcc<100||demAcc<100||crdAcc<100?" Shaded band shows total uncertainty: forecast error + market volatility.":"")},
                   ...(rtBiasFcs?[{l:"RT Learned",c:"#f97316",tip:"Learned market prices. Day-specific averages where observed, cross-day averages for unobserved hours. Converges to actual RTM pattern over time."}]:[]),
                   {l:"RTM",c:"#22d3ee",tip:"Real-Time Market price. Actual settlement price the battery trades against."}].map(x=>(
                   <div key={x.l} title={x.tip} style={{display:"flex",alignItems:"center",gap:3,cursor:"help"}}>
@@ -986,14 +992,21 @@ export default function Dashboard(){
               })()}
               {cp.gap.map((g,i)=>i<23&&<rect key={i} x={g.x} y={g.u} width={pW/23} height={Math.max(1,g.lo-g.u)} fill={g.f} opacity=".06"/>)}
               <path d={cp.dP} fill="none" stroke="#94a3b8" strokeWidth="1" strokeDasharray="4,3" opacity=".5"/>
+              {cp.volBand&&<path d={cp.volBand} fill="#f59e0b" opacity=".08" stroke="none"/>}
               <path d={cp.fP} fill="none" stroke="#f59e0b" strokeWidth="1.5"/>
               {cp.bP&&<path d={cp.bP} fill="none" stroke="#f97316" strokeWidth="1.5" opacity=".85"/>}
               <path d={cp.rP} fill="none" stroke="#22d3ee" strokeWidth="1.5"/>
-              {hovH!==null&&(running?hovH!==simH:true)&&(()=>{const fc=fcs[hovH],hx=cp.x(hovH),bv=rtBiasFcs?rtBiasFcs[hovH]:null;return(<g>
+              {hovH!==null&&(running?hovH!==simH:true)&&(()=>{const fc=fcs[hovH],hx=cp.x(hovH),bv=rtBiasFcs?rtBiasFcs[hovH]:null;
+                const bw=cp.bandW[hovH];
+                const fcHi=fc.fc+bw,fcLo=fc.fc-bw;
+                return(<g>
                 <line x1={hx} y1={PD.t} x2={hx} y2={PD.t+pH} stroke="#ffffff20" strokeWidth="1"/>
+                {bw>0.5&&<><line x1={hx} y1={cp.y(fcHi)} x2={hx} y2={cp.y(fcLo)} stroke="#f59e0b" strokeWidth="1" opacity=".35"/>
+                  <line x1={hx-2} y1={cp.y(fcHi)} x2={hx+2} y2={cp.y(fcHi)} stroke="#f59e0b" strokeWidth="1" opacity=".35"/>
+                  <line x1={hx-2} y1={cp.y(fcLo)} x2={hx+2} y2={cp.y(fcLo)} stroke="#f59e0b" strokeWidth="1" opacity=".35"/></>}
                 <circle cx={hx} cy={cp.y(fc.dam)} r="2.5" fill="#94a3b8"/><circle cx={hx} cy={cp.y(fc.fc)} r="2.5" fill="#f59e0b"/>{bv!==null&&<circle cx={hx} cy={cp.y(bv)} r="2.5" fill="#f97316"/>}<circle cx={hx} cy={cp.y(fc.rtm)} r="2.5" fill="#22d3ee"/>
                 <text x={hx+4} y={PD.t+10} fill="#94a3b8" fontSize="7" fontFamily="inherit">DA ${fc.dam}</text>
-                <text x={hx+4} y={PD.t+20} fill="#f59e0b" fontSize="7" fontFamily="inherit">FC ${fc.fc.toFixed(0)}</text>
+                <text x={hx+4} y={PD.t+20} fill="#f59e0b" fontSize="7" fontFamily="inherit">FC ${fc.fc.toFixed(0)}{bw>0.5?" \u00B1"+bw.toFixed(0):""}</text>
                 {bv!==null&&<text x={hx+4} y={PD.t+30} fill="#f97316" fontSize="7" fontFamily="inherit">LN ${bv.toFixed(0)}</text>}
                 <text x={hx+4} y={PD.t+(bv!==null?40:30)} fill="#22d3ee" fontSize="7" fontFamily="inherit">RT ${fc.rtm}</text>
               </g>);})()}
@@ -1072,7 +1085,20 @@ export default function Dashboard(){
                 <button key={n} title={p.tip} onClick={()=>{setSupAcc(p.sup);setDemAcc(p.dem);setCrdAcc(p.crd);setAccP(n);}} style={{padding:"2px 5px",borderRadius:3,fontSize:f(7),fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:accP===n?"1px solid #60a5fa":"1px solid #1a2744",background:accP===n?"#3b82f610":"#0d1a2e",color:accP===n?"#60a5fa":"#4a6a8a"}}>{n}</button>))}
             </div>
           </div>
-          {/* RISK TOLERANCE */}
+          {/* MARKET VOLATILITY */}
+          <div style={P}>
+            <div title="Controls how much random noise the simulated RT price has around the true RTM value. At 0% the simulation is deterministic (RT = RTM exactly), showing theoretical alpha. At 100% the RT price has high variance around RTM, adding realistic execution slippage. Lower values make it easier to see the value of forecast intelligence. Higher values test robustness." style={LB}>MARKET VOLATILITY</div>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+              <span style={{fontSize:f(8),color:"#f59e0b",fontWeight:600}}>{mktVol===0?"Deterministic":mktVol<=15?"Low":mktVol<=40?"Moderate":mktVol<=70?"High":"Extreme"}</span>
+              <span style={{fontSize:f(9),fontWeight:800,color:"#f59e0b"}}>{mktVol}%</span>
+            </div>
+            <input type="range" min={0} max={100} value={mktVol} onChange={e=>setMktVol(+e.target.value)} style={{width:"100%",height:4,appearance:"none",WebkitAppearance:"none",background:"#1a2744",borderRadius:2,outline:"none",cursor:"pointer",accentColor:"#f59e0b"}}/>
+            <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}>
+              {[{v:0,l:"0%"},{v:15,l:"15%"},{v:25,l:"25%"},{v:50,l:"50%"},{v:100,l:"100%"}].map(o=>(
+                <button key={o.v} onClick={()=>setMktVol(o.v)} style={{padding:"1px 4px",borderRadius:2,cursor:"pointer",fontFamily:"inherit",fontSize:f(7),fontWeight:600,border:mktVol===o.v?"1px solid #f59e0b":"1px solid #1a2744",background:mktVol===o.v?"#f59e0b15":"#0d1a2e",color:mktVol===o.v?"#f59e0b":"#4a6a8a"}}>{o.l}</button>
+              ))}
+            </div>
+          </div>
           {(()=>{const dpOpt=rtLearn||schP==="Naive"||schP==="Optimized"||schP==="RT Learn";return(
           <div style={{...P,opacity:dpOpt?0.5:1,transition:"opacity .2s"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
