@@ -841,34 +841,15 @@ export default function Dashboard(){
           </div>
           {/* P&L */}
           <div title="YOU = P&L from your strategy (schedule + RT Learning). NAIVE = P&L from the DAM-only baseline schedule with zero forecast intelligence. Difference shows the value added by your approach." style={P}>
-            {fleetN<=1?<div>
-              <div style={LB}>P&L: YOU vs NAIVE</div>
-              <div style={{display:"flex",justifyContent:"space-around",alignItems:"center"}}>
-                <div style={{textAlign:"center"}}><div style={{fontSize:f(12),fontWeight:800,color:uPnl>=0?"#22c55e":"#ef4444"}}>${uPnl.toFixed(0)}</div><div style={{fontSize:f(7),color:"#4a6a8a",fontWeight:600}}>YOU</div></div>
-                <div style={{width:1,height:24,background:"#1a2744"}}/>
-                <div style={{textAlign:"center"}}><div style={{fontSize:f(12),fontWeight:800,color:sPnl>=0?"#22c55e":"#ef4444"}}>${sPnl.toFixed(0)}</div><div style={{fontSize:f(7),color:"#94a3b8",fontWeight:600}}>NAIVE</div></div>
-              </div>
-              {ticks.length>10&&(()=>{const d=uPnl-sPnl,pct=Math.abs(sPnl)>1?((d/Math.abs(sPnl))*100):0;return(<div style={{textAlign:"center",fontSize:f(8),marginTop:2,color:d>=0?"#22c55e":"#ef4444",fontWeight:600}}>{d>=0?"\u25B2 +$"+d.toFixed(0):"\u25BC -$"+(-d).toFixed(0)}{Math.abs(pct)>=0.1?" ("+(d>=0?"+":"")+pct.toFixed(1)+"%)":""} vs Naive</div>);})()}
-            </div>:<div>
-              <div style={LB}>P&L: FLEET ({fleetN} UNITS)</div>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"2px 0"}}>
-                <span style={{fontSize:f(7),color:"#4a6a8a"}}>You (per unit)</span>
-                <span style={{fontSize:f(8),fontWeight:700,color:uPnl>=0?"#22c55e":"#ef4444"}}>${uPnl.toFixed(0)}</span>
-              </div>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"2px 0"}}>
-                <span style={{fontSize:f(7),color:"#a855f7",fontWeight:600}}>You (fleet)</span>
-                <span style={{fontSize:f(12),fontWeight:800,color:uPnl>=0?"#22c55e":"#ef4444"}}>{fmtDol(uPnl*fleetN)}</span>
-              </div>
-              <div style={{height:1,background:"#1a2744",margin:"4px 0"}}/>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"2px 0"}}>
-                <span style={{fontSize:f(7),color:"#94a3b8"}}>Naive (per unit)</span>
-                <span style={{fontSize:f(8),fontWeight:700,color:sPnl>=0?"#22c55e":"#ef4444"}}>${sPnl.toFixed(0)}</span>
-              </div>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"2px 0"}}>
-                <span style={{fontSize:f(7),color:"#94a3b8",fontWeight:600}}>Naive (fleet)</span>
-                <span style={{fontSize:f(12),fontWeight:800,color:sPnl>=0?"#22c55e":"#ef4444"}}>{fmtDol(sPnl*fleetN)}</span>
-              </div>
-              {ticks.length>10&&(()=>{const d=(uPnl-sPnl)*fleetN,pct=Math.abs(sPnl)>1?((uPnl-sPnl)/Math.abs(sPnl)*100):0;return(<div style={{textAlign:"center",fontSize:f(8),marginTop:4,paddingTop:4,borderTop:"1px solid #1a2744",color:d>=0?"#22c55e":"#ef4444",fontWeight:600}}>{d>=0?"\u25B2 +"+fmtDol(d):"\u25BC -"+fmtDol(-d)}{Math.abs(pct)>=0.1?" ("+(d>=0?"+":"")+pct.toFixed(1)+"%)":""} vs Naive</div>);})()}
+            <div style={LB}>P&L: YOU vs NAIVE{fleetN>1?" ("+fleetN+" units)":""}</div>
+            <div style={{display:"flex",justifyContent:"space-around",alignItems:"center"}}>
+              <div style={{textAlign:"center"}}><div style={{fontSize:f(12),fontWeight:800,color:uPnl>=0?"#22c55e":"#ef4444"}}>{fmtDol(uPnl*fleetN)}</div><div style={{fontSize:f(7),color:"#4a6a8a",fontWeight:600}}>YOU</div></div>
+              <div style={{width:1,height:24,background:"#1a2744"}}/>
+              <div style={{textAlign:"center"}}><div style={{fontSize:f(12),fontWeight:800,color:sPnl>=0?"#22c55e":"#ef4444"}}>{fmtDol(sPnl*fleetN)}</div><div style={{fontSize:f(7),color:"#94a3b8",fontWeight:600}}>NAIVE</div></div>
+            </div>
+            {ticks.length>10&&(()=>{const d=(uPnl-sPnl)*fleetN,pct=Math.abs(sPnl)>1?((uPnl-sPnl)/Math.abs(sPnl)*100):0;return(<div style={{textAlign:"center",fontSize:f(8),marginTop:2,color:d>=0?"#22c55e":"#ef4444",fontWeight:600}}>{d>=0?"\u25B2 +"+fmtDol(d):"\u25BC -"+fmtDol(-d)}{Math.abs(pct)>=0.1?" ("+(d>=0?"+":"")+pct.toFixed(1)+"%)":""} vs Naive</div>);})()}
+            {fleetN>1&&<div style={{display:"flex",justifyContent:"space-between",marginTop:4,paddingTop:4,borderTop:"1px solid #1a2744",fontSize:f(7),color:"#3a5a7a"}}>
+              <span>Per unit: <span style={{color:uPnl>=0?"#22c55e":"#ef4444",fontWeight:700}}>${uPnl.toFixed(0)}</span> vs <span style={{color:sPnl>=0?"#22c55e":"#ef4444",fontWeight:700}}>${sPnl.toFixed(0)}</span></span>
             </div>}
           </div>
           {/* Revenue */}
