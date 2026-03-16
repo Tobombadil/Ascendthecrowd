@@ -84,7 +84,14 @@ const FLOOR_MAR=3,CEIL_MAR=2; // SOC safety margins: eMin=minSoc+FLOOR_MAR, eMax
 const SPH=4; // sub-hourly slots per hour (15-min resolution)
 
 // ── Core math ─────────────────────────────────────────────────
-function fcast(dam,rtm,sS,dS,cS,sa,da,ca){return dam+(rtm-dam)*(sS*(sa/100)+dS*(da/100)+cS*(ca/100));}
+function fcast(dam,rtm,sS,dS,cS,sa,da,ca,sw,dw,cw){
+  // Weights redistribute shares: higher weight = more influence from that factor
+  // Normalization ensures forecast stays bounded between DAM and RTM
+  const ws=sw===undefined?1:sw,wd=dw===undefined?1:dw,wc=cw===undefined?1:cw;
+  const rs=sS*ws,rd=dS*wd,rc=cS*wc,t=rs+rd+rc;
+  if(t<=0)return dam;
+  return dam+(rtm-dam)*((rs/t)*(sa/100)+(rd/t)*(da/100)+(rc/t)*(ca/100));
+}
 function gauss(){let u=0,v=0;while(!u)u=Math.random();while(!v)v=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
 
 function calcSOCTraj(sch,dayKey,b,s0){
@@ -222,10 +229,10 @@ function buildDaySch(prices,b,s0){
   return{sch,subSch:res.subSch,endSoc:res.endSoc};
 }
 
-function buildWeekSch(b,s0,sa,da,ca,priceMode){
+function buildWeekSch(b,s0,sa,da,ca,priceMode,sw,dw,cw){
   const week={},subWeek={};let s=s0;
   DAYS.forEach(dk=>{
-    const prices=WEEK[dk].d.map(([h,dam,rtm,sS,dS,cS])=>priceMode==="dam"?dam:fcast(dam,rtm,sS,dS,cS,sa,da,ca));
+    const prices=WEEK[dk].d.map(([h,dam,rtm,sS,dS,cS])=>priceMode==="dam"?dam:fcast(dam,rtm,sS,dS,cS,sa,da,ca,sw,dw,cw));
     const res=buildDaySch(prices,b,s);week[dk]=res.sch;subWeek[dk]=res.subSch;s=res.endSoc;
   });return{week,subWeek};
 }
@@ -324,6 +331,9 @@ export default function Dashboard(){
   const [supAcc,setSupAcc]=useState(85);
   const [demAcc,setDemAcc]=useState(75);
   const [crdAcc,setCrdAcc]=useState(70);
+  const [supW,setSupW]=useState(1);
+  const [demW,setDemW]=useState(1);
+  const [crdW,setCrdW]=useState(1);
   const [mktVol,setMktVol]=useState(25); // market volatility 0-100 (0=deterministic, 100=high noise)
   const [accP,setAccP]=useState("Ascend");
   const [hovH,setHovH]=useState(null);
@@ -369,6 +379,7 @@ export default function Dashboard(){
   const [colR,setColR]=useState(false);
   const [battOpen,setBattOpen]=useState(true);
   const [profitOpen,setProfitOpen]=useState(true);
+  const [fcOpen,setFcOpen]=useState(true);
   const [mobPanel,setMobPanel]=useState("center"); // mobile: "trade","center","config"
   const learnLastDay=useRef(-1);
   const learnSeenRef=useRef(new Set());
@@ -418,7 +429,7 @@ export default function Dashboard(){
       return rows.map(([h,dam,rtm,sS,dS,cS])=>{
         if(dayLr[h]&&dayLr[h].n>=1)return dayLr[h].sum/dayLr[h].n;
         if(xd[h]&&xd[h].n>=1)return xd[h].sum/xd[h].n;
-        return fcast(dam,rtm,sS,dS,cS,supAcc,demAcc,crdAcc);
+        return fcast(dam,rtm,sS,dS,cS,supAcc,demAcc,crdAcc,supW,demW,crdW);
       });
     };
     const newSch={...sch};const newSubSch={...subSchRef.current};
@@ -473,7 +484,7 @@ export default function Dashboard(){
       setAlerts(prev=>[{id:Date.now(),time:DAYS[simD]+" "+String(simH).padStart(2,"0")+":"+String(simM).padStart(2,"0"),
         tag:"RT LEARN",tc:"#a855f7",msg:"Rebuilt from hr "+simH+". "+dk+": "+nObs+"/24 obs, "+nXd+"/24 cross-day."},...prev]);
     }
-  },[simD,simH,simM,sch,batt,supAcc,demAcc,crdAcc]);
+  },[simD,simH,simM,sch,batt,supAcc,demAcc,crdAcc,supW,demW,crdW]);
 
   const toggleRtLearn=useCallback(()=>{
     if(rtLearn){setRtLearn(false);rtOptLastH.current=-1;learnLastDay.current=-1;lastRebuildTime.current=-999;return;}
@@ -504,7 +515,7 @@ export default function Dashboard(){
 
   // ── Derived data ───────────────────────────────────────────
   const dayD=WEEK[selDay];
-  const fcs=useMemo(()=>dayD.d.map(([h,dam,rtm,sS,dS,cS])=>({h,dam,rtm,fc:fcast(dam,rtm,sS,dS,cS,supAcc,demAcc,crdAcc)})),[dayD,supAcc,demAcc,crdAcc]);
+  const fcs=useMemo(()=>dayD.d.map(([h,dam,rtm,sS,dS,cS])=>({h,dam,rtm,fc:fcast(dam,rtm,sS,dS,cS,supAcc,demAcc,crdAcc,supW,demW,crdW),sS,dS,cS})),[dayD,supAcc,demAcc,crdAcc,supW,demW,crdW]);
   const crowdPct=useMemo(()=>{const g=dayD.d.map(r=>Math.abs(r[2]-r[1]));const c=dayD.d.map((r,i)=>g[i]*r[5]);return(c.reduce((a,b)=>a+b,0)/Math.max(1,g.reduce((a,b)=>a+b,0)))*100;},[dayD]);
   const mae=useMemo(()=>fcs.reduce((a,f)=>a+Math.abs(f.fc-f.rtm),0)/fcs.length,[fcs]);
   // RT Learning price curve (clean hourly)
@@ -578,7 +589,7 @@ export default function Dashboard(){
           const subSS=sS*(1-mu)+nRow[3]*mu;
           const subDS=dS*(1-mu)+nRow[4]*mu;
           const subCS=cS*(1-mu)+nRow[5]*mu;
-          const fcV=fcast(subDam,subRtm,subSS,subDS,subCS,supAcc,demAcc,crdAcc);
+          const fcV=fcast(subDam,subRtm,subSS,subDS,subCS,supAcc,demAcc,crdAcc,supW,demW,crdW);
           const volScale=mktVol/100;
           const noise=gauss()*Math.max(Math.abs(subRtm*.12),2)*0.25*volScale;
           const blend=volScale>0?0.3*volScale:0;
@@ -630,7 +641,7 @@ export default function Dashboard(){
           setTlog(p=>{const l=p[0];if(!l||l.mode!==em)return[{time:dn+" "+ts,mode:em,rt:Math.round(rt*10)/10,soc:Math.round(newSoc*10)/10,ovr:!!manual||r.ovr,id:Date.now()},...p].slice(0,40);return p;});
           return ch;});return cd;});return nm;});
     },speed);return()=>clearInterval(tickRef.current);
-  },[running,speed,sigTh,sch,schP,naiveSch,naiveSubSch,manual,rtLearn,supAcc,demAcc,crdAcc,mktVol,batt,minSoc,maxSoc]);
+  },[running,speed,sigTh,sch,schP,naiveSch,naiveSubSch,manual,rtLearn,supAcc,demAcc,crdAcc,supW,demW,crdW,mktVol,batt,minSoc,maxSoc]);
 
   const last=ticks[ticks.length-1];
   const eMode=manual||(rec?rec.mode:"HOLD");
@@ -639,29 +650,34 @@ export default function Dashboard(){
   const CW=540,CH=155,PD={t:14,r:10,b:20,l:36},pW=CW-PD.l-PD.r,pH=CH-PD.t-PD.b;
   const cp=useMemo(()=>{
     const volScale=mktVol/100;
-    // Uncertainty band around FORECAST: forecast error + market noise
-    const bandW=fcs.map(f=>{
-      const fcErr=Math.abs(f.rtm-f.fc);
+    // Active forecast: use learned prices when RT Learn is on, original forecast otherwise
+    const activeFc=fcs.map((f,h)=>{
+      if(!rtBiasFcs)return f.fc;
+      return rtBiasFcs[h];
+    });
+    // Uncertainty band around active forecast
+    const bandW=fcs.map((f,i)=>{
+      const fcErr=Math.abs(f.rtm-activeFc[i]);
       const noise=Math.max(Math.abs(f.rtm*0.12),2)*0.25*volScale*3.5;
       return fcErr+noise;
     });
-    const av=fcs.flatMap((f,i)=>[f.dam,f.fc+bandW[i],f.fc-bandW[i],f.rtm]);
-    if(rtBiasFcs)rtBiasFcs.forEach(v=>av.push(v));
+    const av=fcs.flatMap((f,i)=>[f.dam,activeFc[i]+bandW[i],activeFc[i]-bandW[i],f.rtm]);
     const yMn=Math.min(...av)-3,yMx=Math.max(...av)+3,yR=yMx-yMn||1;
     const x=i=>PD.l+(i/23)*pW,y=v=>PD.t+pH-((v-yMn)/yR)*pH;
     const dP=fcs.map((f,i)=>(i?'L':'M')+x(i)+','+y(f.dam)).join('');
     const rP=fcs.map((f,i)=>(i?'L':'M')+x(i)+','+y(f.rtm)).join('');
     const fP=fcs.map((f,i)=>(i?'L':'M')+x(i)+','+y(f.fc)).join('');
-    const bP=rtBiasFcs?rtBiasFcs.map((v,i)=>(i?'L':'M')+x(i)+','+y(v)).join(''):null;
+    // Active forecast line (learned when RT Learn on, original otherwise)
+    const aP=activeFc.map((v,i)=>(i?'L':'M')+x(i)+','+y(v)).join('');
     let volBand=null;
     if(bandW.some(w=>w>0.5)){
-      const upper=fcs.map((f,i)=>(i?'L':'M')+x(i)+','+y(f.fc+bandW[i])).join('');
-      const lower=fcs.slice().reverse().map((f,i)=>{const j=23-i;return'L'+x(j)+','+y(fcs[j].fc-bandW[j]);}).join('');
+      const upper=activeFc.map((v,i)=>(i?'L':'M')+x(i)+','+y(v+bandW[i])).join('');
+      const lower=activeFc.slice().reverse().map((v,i)=>{const j=23-i;return'L'+x(j)+','+y(activeFc[j]-bandW[j]);}).join('');
       volBand=upper+lower+'Z';
     }
-    const gap=fcs.map((f,i)=>({i,x:x(i),u:y(Math.max(f.fc,f.rtm)),lo:y(Math.min(f.fc,f.rtm)),f:f.fc>f.rtm?"#3b82f6":"#ef4444"}));
+    const gap=fcs.map((f,i)=>({i,x:x(i),u:y(Math.max(activeFc[i],f.rtm)),lo:y(Math.min(activeFc[i],f.rtm)),f:activeFc[i]>f.rtm?"#3b82f6":"#ef4444"}));
     const yT=[];const st=yR>120?30:yR>60?15:yR>30?10:5;for(let v=Math.ceil(yMn/st)*st;v<=yMx;v+=st)yT.push({v,py:y(v)});
-    return{dP,rP,fP,bP,volBand,bandW,gap,yT,x,y,sch:sch[selDay]};
+    return{dP,rP,fP,aP,volBand,bandW,activeFc,gap,yT,x,y,sch:sch[selDay]};
   },[fcs,sch,selDay,rtBiasFcs,mktVol]);
   const rtC=useMemo(()=>{
     if(ticks.length<2)return null;const vis=ticks.slice(-80),av=vis.flatMap(t=>[t.fv,t.rt]);
@@ -683,7 +699,7 @@ export default function Dashboard(){
   const SchBtns=()=>{const bs={flex:1,minWidth:0,borderRadius:3,cursor:"pointer",fontFamily:"inherit",fontSize:f(8),fontWeight:600,padding:"3px 0",textAlign:"center"};return(
     <div style={{display:"flex",gap:2,minWidth:0}}>
       <button title="Schedule using day-ahead market prices only. No forecast intelligence." onClick={()=>{const r=buildWeekSch(batt,startSoc,0,0,0,"dam");setSch(r.week);subSchRef.current=r.subWeek;setSubSchRev(v=>v+1);setSchP("Naive");setRtLearn(false);}} style={{...bs,border:schP==="Naive"?"1px solid #94a3b8":"1px solid #1a2744",background:schP==="Naive"?"#94a3b820":"#0d1a2e",color:schP==="Naive"?"#94a3b8":"#4a6a8a"}}>Naive</button>
-      <button title="Optimize schedule using supply, demand, and crowd forecasts via dynamic programming." onClick={()=>{const r=buildWeekSch(batt,startSoc,supAcc,demAcc,crdAcc,"fc");setSch(r.week);subSchRef.current=r.subWeek;setSubSchRev(v=>v+1);setSchP("Optimized");setRtLearn(false);}} style={{...bs,border:schP==="Optimized"?"1px solid #22c55e":"1px solid #1a2744",background:schP==="Optimized"?"#22c55e20":"#0d1a2e",color:schP==="Optimized"?"#22c55e":"#4a6a8a"}}>{"\u2728"} Optimize</button>
+      <button title="Optimize schedule using supply, demand, and crowd forecasts via dynamic programming." onClick={()=>{const r=buildWeekSch(batt,startSoc,supAcc,demAcc,crdAcc,"fc",supW,demW,crdW);setSch(r.week);subSchRef.current=r.subWeek;setSubSchRev(v=>v+1);setSchP("Optimized");setRtLearn(false);}} style={{...bs,border:schP==="Optimized"?"1px solid #22c55e":"1px solid #1a2744",background:schP==="Optimized"?"#22c55e20":"#0d1a2e",color:schP==="Optimized"?"#22c55e":"#4a6a8a"}}>{"\u2728"} Optimize</button>
       <button title="Clear all scheduled actions to HOLD." onClick={()=>{setSch(p=>{const c={...p};DAYS.forEach(d=>{c[d]=Array(24).fill("H");});return c;});subSchRef.current={};DAYS.forEach(d=>{subSchRef.current[d]=Array(96).fill("H");});setSubSchRev(v=>v+1);setSchP("Clear");setRtLearn(false);}} style={{...bs,border:schP==="Clear"?"1px solid #60a5fa":"1px solid #1a2744",background:schP==="Clear"?"#3b82f620":"#0d1a2e",color:schP==="Clear"?"#60a5fa":"#4a6a8a"}}>Clear</button>
     </div>);
   };
@@ -762,8 +778,8 @@ export default function Dashboard(){
 
       {/* Mobile nav bar */}
       {mob&&<div style={{display:"flex",gap:0,marginBottom:8,background:"#0b1628",borderRadius:6,border:"1px solid #1a2744",overflow:"hidden"}}>
-        {[{k:"trade",icon:"\u25B6",label:"Trade",c:"#22c55e"},{k:"center",icon:"\u2637",label:"Charts",c:"#22d3ee"},{k:"config",icon:"\u2699",label:"Config",c:"#f59e0b"}].map(t=>(
-          <button key={t.k} onClick={()=>setMobPanel(t.k)} style={{flex:1,padding:"10px 0",border:"none",borderBottom:mobPanel===t.k?"2px solid "+t.c:"2px solid transparent",background:mobPanel===t.k?t.c+"10":"transparent",cursor:"pointer",fontFamily:"inherit",textAlign:"center"}}>
+        {[{k:"trade",icon:"\u25B6",label:"Trade",c:"#22c55e",t:"Live trading controls: mode, SOC, P&L, overrides, and trade log."},{k:"center",icon:"\u2637",label:"Charts",c:"#22d3ee",t:"Price charts, schedule grid, revenue benchmarks, and day selection."},{k:"config",icon:"\u2699",label:"Config",c:"#f59e0b",t:"Forecast intelligence, battery constraints, market volatility, and fleet scaling."}].map(t=>(
+          <button key={t.k} title={t.t} onClick={()=>setMobPanel(t.k)} style={{flex:1,padding:"10px 0",border:"none",borderBottom:mobPanel===t.k?"2px solid "+t.c:"2px solid transparent",background:mobPanel===t.k?t.c+"10":"transparent",cursor:"pointer",fontFamily:"inherit",textAlign:"center"}}>
             <div style={{fontSize:16,lineHeight:1}}>{t.icon}</div>
             <div style={{fontSize:f(7),fontWeight:700,color:mobPanel===t.k?t.c:"#4a6a8a",marginTop:2,letterSpacing:".06em"}}>{t.label}</div>
           </button>))}
@@ -815,8 +831,8 @@ export default function Dashboard(){
                   <div title="How often the system rebuilds the trading schedule using learned price data. 24hr = once per day at midnight (most stable, least adaptive). 4hr = six times daily (good balance). 1hr = every hour (very adaptive, some churn). 15min = every quarter hour (maximum adaptation, mirrors real-time trading desk behavior). More frequent rebuilds capture intraday price shifts faster but may cause schedule instability.">
                     <div style={{fontSize:f(7),color:"#3a5a7a",fontWeight:700,letterSpacing:".06em",marginBottom:2,marginTop:4}}>REBUILD CADENCE</div>
                     <div style={{display:"flex",flexWrap:"wrap",gap:2}}>
-                      {[{v:24,l:"24h"},{v:12,l:"12h"},{v:4,l:"4h"},{v:2,l:"2h"},{v:1,l:"1h"},{v:0.5,l:"30m"},{v:0.25,l:"15m"}].map(o=>(
-                        <button key={o.v} onClick={()=>setRlRebuildCad(o.v)} style={{padding:"1px 4px",borderRadius:2,cursor:"pointer",fontFamily:"inherit",fontSize:f(7),fontWeight:600,textAlign:"center",border:rlRebuildCad===o.v?"1px solid #f59e0b":"1px solid #1a2744",background:rlRebuildCad===o.v?"#f59e0b15":"#0d1a2e",color:rlRebuildCad===o.v?"#f59e0b":"#4a6a8a"}}>{o.l}</button>
+                      {[{v:24,l:"24h",t:"Rebuild once per day. Minimal adaptation."},{v:12,l:"12h",t:"Rebuild every 12 hours."},{v:4,l:"4h",t:"Rebuild every 4 hours. Good default."},{v:2,l:"2h",t:"Rebuild every 2 hours."},{v:1,l:"1h",t:"Rebuild every hour. Responsive."},{v:0.5,l:"30m",t:"Rebuild every 30 minutes. Aggressive."},{v:0.25,l:"15m",t:"Rebuild every 15 minutes. Maximum adaptation."}].map(o=>(
+                        <button key={o.v} title={o.t} onClick={()=>setRlRebuildCad(o.v)} style={{padding:"1px 4px",borderRadius:2,cursor:"pointer",fontFamily:"inherit",fontSize:f(7),fontWeight:600,textAlign:"center",border:rlRebuildCad===o.v?"1px solid #f59e0b":"1px solid #1a2744",background:rlRebuildCad===o.v?"#f59e0b15":"#0d1a2e",color:rlRebuildCad===o.v?"#f59e0b":"#4a6a8a"}}>{o.l}</button>
                       ))}
                     </div>
                   </div>
@@ -826,7 +842,7 @@ export default function Dashboard(){
           </div>
           {/* State of Charge */}
           <div title={"Current battery energy level. Red/green markers show effective operating SOC bounds (including safety buffers). Current: "+soc.toFixed(0)+"% = "+((soc/100)*battMWh).toFixed(0)+"MWh of "+battMWh+"MWh."} style={P}>
-            <div style={LB}>STATE OF CHARGE (SoC)</div>
+            <div title={"Battery energy level as percentage of capacity. Red/green markers show effective operating bounds (including safety buffers). Current: "+soc.toFixed(0)+"% = "+((soc/100)*battMWh).toFixed(0)+"MWh of "+battMWh+"MWh."} style={LB}>STATE OF CHARGE (SoC)</div>
             <div style={{position:"relative",height:18,background:"#0d1a2e",borderRadius:3,overflow:"hidden",border:"1px solid #1a2744"}}>
               <div style={{position:"absolute",left:(minSoc+3)+"%",top:0,width:1,height:"100%",background:"#ef444460",zIndex:1}}/>
               <div style={{position:"absolute",left:(maxSoc-2)+"%",top:0,width:1,height:"100%",background:"#22c55e60",zIndex:1}}/>
@@ -841,7 +857,7 @@ export default function Dashboard(){
           </div>
           {/* P&L */}
           <div title="YOU = P&L from your strategy (schedule + RT Learning). NAIVE = P&L from the DAM-only baseline schedule with zero forecast intelligence. Difference shows the value added by your approach." style={P}>
-            <div style={LB}>P&L: YOU vs NAIVE{fleetN>1?" ("+fleetN+" units)":""}</div>
+            <div title="Compares your strategy's cumulative P&L against the Naive (DAM-only) baseline. Both execute the same tick engine at the same RT prices. The difference is the value added by forecast intelligence." style={LB}>P&L: YOU vs NAIVE{fleetN>1?" ("+fleetN+" units)":""}</div>
             <div style={{display:"flex",justifyContent:"space-around",alignItems:"center"}}>
               <div style={{textAlign:"center"}}><div style={{fontSize:f(12),fontWeight:800,color:uPnl>=0?"#22c55e":"#ef4444"}}>{fmtDol(uPnl*fleetN)}</div><div style={{fontSize:f(7),color:"#4a6a8a",fontWeight:600}}>YOU</div></div>
               <div style={{width:1,height:24,background:"#1a2744"}}/>
@@ -888,7 +904,7 @@ export default function Dashboard(){
           {/* Alerts */}
           <div style={{...P,maxHeight:110,overflowY:"auto"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-              <div style={LB}>ALERTS</div>
+              <div title="Real-time events triggered during simulation: crowd compression detection, price spikes, SOC limit warnings, and RT Learn schedule rebuilds." style={LB}>ALERTS</div>
               {alerts.length>0&&<span style={{fontSize:f(7),padding:"1px 4px",borderRadius:8,background:"#ef444420",color:"#ef4444",fontWeight:700}}>{alerts.length}</span>}
             </div>
             {alerts.length===0?<div style={{color:"#2a4a6a",fontSize:f(9),textAlign:"center",padding:"4px 0"}}>No events yet</div>:(
@@ -901,7 +917,7 @@ export default function Dashboard(){
           </div>
           {/* Trade log */}
           <div style={{...P,maxHeight:100,overflowY:"auto"}}>
-            <div style={LB}>TRADE LOG</div>
+            <div title="Chronological log of mode transitions (Charge/Discharge/Hold). Shows the RT price and SOC at each transition. OVR = manual override or system recommendation overriding the schedule." style={LB}>TRADE LOG</div>
             {tlog.length===0?<div style={{color:"#2a4a6a",fontSize:f(8)}}>Mode changes logged here.</div>:(
               <div style={{display:"flex",flexDirection:"column",gap:1}}>
                 {tlog.map(t=>(<div key={t.id} style={{display:"flex",gap:3,padding:"2px 3px",borderLeft:"2px solid "+(MC[t.mode]||"#94a3b8"),fontSize:f(7)}}>
@@ -924,8 +940,8 @@ export default function Dashboard(){
         {(mob?mobPanel==="center":true)&&<div style={{flex:1,display:"flex",flexDirection:"column",gap:6,minWidth:0,overflow:"hidden"}}>
           {/* Mobile compact run bar */}
           {mob&&<div style={{...P,display:"flex",alignItems:"center",gap:6,padding:"6px 10px"}}>
-            <button onClick={()=>setRunning(!running)} style={{padding:"5px 12px",borderRadius:3,border:"1px solid "+(running?"#ef4444":"#22c55e"),background:(running?"#ef4444":"#22c55e")+"20",color:running?"#ef4444":"#22c55e",fontFamily:"inherit",fontSize:f(9),fontWeight:700,cursor:"pointer"}}>{running?"\u25A0 STOP":"\u25B6 RUN"}</button>
-            <button onClick={reset} style={{padding:"5px 8px",borderRadius:3,border:"1px solid #1a2744",background:"#0d1a2e",color:"#4a6a8a",fontFamily:"inherit",fontSize:f(8),fontWeight:600,cursor:"pointer"}}>RESET</button>
+            <button title={running?"Stop the real-time simulation.":"Start the real-time trading simulation. Ticks through the week at the selected speed."} onClick={()=>setRunning(!running)} style={{padding:"5px 12px",borderRadius:3,border:"1px solid "+(running?"#ef4444":"#22c55e"),background:(running?"#ef4444":"#22c55e")+"20",color:running?"#ef4444":"#22c55e",fontFamily:"inherit",fontSize:f(9),fontWeight:700,cursor:"pointer"}}>{running?"\u25A0 STOP":"\u25B6 RUN"}</button>
+            <button title="Reset simulation to starting conditions: SOC, P&L, ticks, and alerts all cleared." onClick={reset} style={{padding:"5px 8px",borderRadius:3,border:"1px solid #1a2744",background:"#0d1a2e",color:"#4a6a8a",fontFamily:"inherit",fontSize:f(8),fontWeight:600,cursor:"pointer"}}>RESET</button>
             <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:8}}>
               <div style={{textAlign:"center"}}><div style={{fontSize:f(9),fontWeight:800,color:MC[eMode]||"#94a3b8",lineHeight:1}}>{eMode}</div><div style={{fontSize:f(7),color:"#4a6a8a"}}>MODE</div></div>
               <div style={{textAlign:"center"}}><div style={{fontSize:f(9),fontWeight:800,color:soc>60?"#22c55e":soc>30?"#f59e0b":"#ef4444",lineHeight:1}}>{soc.toFixed(0)}%</div><div style={{fontSize:f(7),color:"#4a6a8a"}}>SOC</div></div>
@@ -935,14 +951,14 @@ export default function Dashboard(){
           {/* Day tabs */}
           <div style={{display:"flex",gap:3}}>
             {DAYS.map((d,i)=>(
-              <button key={d} onClick={()=>setSelDay(d)} style={{flex:1,padding:mob?"6px 2px":"4px 2px",borderRadius:4,cursor:"pointer",fontFamily:"inherit",textAlign:"center",fontSize:f(9),fontWeight:700,border:selDay===d?"1px solid #22d3ee":"1px solid #1a2744",background:selDay===d?"#22d3ee15":"#0d1a2e",color:selDay===d?"#22d3ee":(running&&i===simD?"#f59e0b":"#4a6a8a")}}>
+              <button key={d} title={WEEK[d].note+" Click to view this day's price curves, schedule, and revenue."} onClick={()=>setSelDay(d)} style={{flex:1,padding:mob?"6px 2px":"4px 2px",borderRadius:4,cursor:"pointer",fontFamily:"inherit",textAlign:"center",fontSize:f(9),fontWeight:700,border:selDay===d?"1px solid #22d3ee":"1px solid #1a2744",background:selDay===d?"#22d3ee15":"#0d1a2e",color:selDay===d?"#22d3ee":(running&&i===simD?"#f59e0b":"#4a6a8a")}}>
                 <div>{d}</div><div style={{fontSize:f(7),fontWeight:400,color:"#3a5a7a"}}>{WEEK[d].date}</div>
               </button>))}
           </div>
           {/* Context row */}
           <div style={{display:"flex",gap:8,padding:mob?"6px 10px":"4px 8px",...P,flexWrap:"wrap"}}>
-            {[{l:"DA Avg",v:"$"+(dayD.d.reduce((a,r)=>a+r[1],0)/24).toFixed(0),c:"#94a3b8"},{l:"RT Avg",v:"$"+(dayD.d.reduce((a,r)=>a+r[2],0)/24).toFixed(0),c:"#22d3ee"},{l:"Crowd",v:crowdPct.toFixed(0)+"%",c:"#ef4444"},{l:"MAE",v:"$"+mae.toFixed(1),c:"#f59e0b"},{l:"",v:dayD.note,c:"#5a7a9a",w:true}].map((m,i)=>(
-              <div key={i} style={{display:"flex",gap:3,alignItems:"center",flex:m.w?1:0,whiteSpace:"nowrap"}}>
+            {[{l:"DA Avg",v:"$"+(dayD.d.reduce((a,r)=>a+r[1],0)/24).toFixed(0),c:"#94a3b8",t:"Average day-ahead market price for this day."},{l:"RT Avg",v:"$"+(dayD.d.reduce((a,r)=>a+r[2],0)/24).toFixed(0),c:"#22d3ee",t:"Average real-time market price. Lower than DA when crowd compression is present."},{l:"Crowd",v:crowdPct.toFixed(0)+"%",c:"#ef4444",t:"Weighted crowd influence: percentage of the DAM-RTM basis attributable to BESS fleet crowding behavior."},{l:"MAE",v:"$"+mae.toFixed(1),c:"#f59e0b",t:"Mean Absolute Error: average difference between your forecast and actual RTM. Lower = better forecast."},{l:"",v:dayD.note,c:"#5a7a9a",w:true}].map((m,i)=>(
+              <div key={i} title={m.t} style={{display:"flex",gap:3,alignItems:"center",flex:m.w?1:0,whiteSpace:"nowrap"}}>
                 {m.l&&<span style={{fontSize:f(7),color:"#3a5a7a",fontWeight:600}}>{m.l}</span>}
                 <span style={{fontSize:f(9),fontWeight:700,color:m.c}}>{m.v}</span>
               </div>))}
@@ -950,10 +966,11 @@ export default function Dashboard(){
           {/* Price chart */}
           <div style={P}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
-              <div style={LB}>{dayD.label} PRICE CURVES</div>
+              <div title="24-hour price profiles for the selected day. DAM (dashed gray) = day-ahead settlement. RTM (cyan) = real-time 5-min averaged LMP. Forecast (amber/orange) = blended estimate used by the optimizer. Shaded band = uncertainty range. Colored rectangles behind the chart show the sub-hourly schedule (charge=green, discharge=red)." style={LB}>{dayD.label} PRICE CURVES</div>
               <div style={{display:"flex",gap:10}}>
-                {[{l:"DAM",c:"#94a3b8",d:true,tip:"Day-Ahead Market price. Set the prior day. Dashed line."},{l:"Forecast",c:"#f59e0b",tip:"System's blended forecast using supply, demand, and crowd signals at your accuracy settings."+(mktVol>0||supAcc<100||demAcc<100||crdAcc<100?" Shaded band shows total uncertainty: forecast error + market volatility.":"")},
-                  ...(rtBiasFcs?[{l:"RT Learned",c:"#f97316",tip:"Learned market prices. Day-specific averages where observed, cross-day averages for unobserved hours. Converges to actual RTM pattern over time."}]:[]),
+                {[{l:"DAM",c:"#94a3b8",d:true,tip:"Day-Ahead Market price. Set the prior day. Dashed line."},
+                  rtBiasFcs?{l:"Learned",c:"#f97316",tip:"RT Learned prices driving the optimizer. Day-specific averages where observed, cross-day for unobserved hours. Original forecast shown as faded dashed line. Band shows remaining uncertainty."}
+                    :{l:"Forecast",c:"#f59e0b",tip:"System's blended forecast using supply, demand, and crowd signals at your accuracy settings."+(mktVol>0||supAcc<100||demAcc<100||crdAcc<100?" Shaded band shows total uncertainty: forecast error + market volatility.":"")},
                   {l:"RTM",c:"#22d3ee",tip:"Real-Time Market price. Actual settlement price the battery trades against."}].map(x=>(
                   <div key={x.l} title={x.tip} style={{display:"flex",alignItems:"center",gap:3,cursor:"help"}}>
                     <svg width="12" height="2"><line x1="0" y1="1" x2="12" y2="1" stroke={x.c} strokeWidth="1.5" strokeDasharray={x.d?"3,2":"none"}/></svg>
@@ -973,23 +990,25 @@ export default function Dashboard(){
               })()}
               {cp.gap.map((g,i)=>i<23&&<rect key={i} x={g.x} y={g.u} width={pW/23} height={Math.max(1,g.lo-g.u)} fill={g.f} opacity=".06"/>)}
               <path d={cp.dP} fill="none" stroke="#94a3b8" strokeWidth="1" strokeDasharray="4,3" opacity=".5"/>
-              {cp.volBand&&<path d={cp.volBand} fill="#f59e0b" opacity=".08" stroke="none"/>}
-              <path d={cp.fP} fill="none" stroke="#f59e0b" strokeWidth="1.5"/>
-              {cp.bP&&<path d={cp.bP} fill="none" stroke="#f97316" strokeWidth="1.5" opacity=".85"/>}
+              {cp.volBand&&<path d={cp.volBand} fill={rtBiasFcs?"#f97316":"#f59e0b"} opacity=".08" stroke="none"/>}
+              {rtBiasFcs&&<path d={cp.fP} fill="none" stroke="#f59e0b" strokeWidth="1" opacity=".3" strokeDasharray="3,3"/>}
+              <path d={cp.aP} fill="none" stroke={rtBiasFcs?"#f97316":"#f59e0b"} strokeWidth="1.5"/>
               <path d={cp.rP} fill="none" stroke="#22d3ee" strokeWidth="1.5"/>
-              {hovH!==null&&(running?hovH!==simH:true)&&(()=>{const fc=fcs[hovH],hx=cp.x(hovH),bv=rtBiasFcs?rtBiasFcs[hovH]:null;
+              {hovH!==null&&(running?hovH!==simH:true)&&(()=>{const fc=fcs[hovH],hx=cp.x(hovH),af=cp.activeFc[hovH];
                 const bw=cp.bandW[hovH];
-                const fcHi=fc.fc+bw,fcLo=fc.fc-bw;
+                const isLearned=!!rtBiasFcs,bandC=isLearned?"#f97316":"#f59e0b";
+                const afHi=af+bw,afLo=af-bw;
                 return(<g>
                 <line x1={hx} y1={PD.t} x2={hx} y2={PD.t+pH} stroke="#ffffff20" strokeWidth="1"/>
-                {bw>0.5&&<><line x1={hx} y1={cp.y(fcHi)} x2={hx} y2={cp.y(fcLo)} stroke="#f59e0b" strokeWidth="1" opacity=".35"/>
-                  <line x1={hx-2} y1={cp.y(fcHi)} x2={hx+2} y2={cp.y(fcHi)} stroke="#f59e0b" strokeWidth="1" opacity=".35"/>
-                  <line x1={hx-2} y1={cp.y(fcLo)} x2={hx+2} y2={cp.y(fcLo)} stroke="#f59e0b" strokeWidth="1" opacity=".35"/></>}
-                <circle cx={hx} cy={cp.y(fc.dam)} r="2.5" fill="#94a3b8"/><circle cx={hx} cy={cp.y(fc.fc)} r="2.5" fill="#f59e0b"/>{bv!==null&&<circle cx={hx} cy={cp.y(bv)} r="2.5" fill="#f97316"/>}<circle cx={hx} cy={cp.y(fc.rtm)} r="2.5" fill="#22d3ee"/>
+                {bw>0.5&&<><line x1={hx} y1={cp.y(afHi)} x2={hx} y2={cp.y(afLo)} stroke={bandC} strokeWidth="1" opacity=".35"/>
+                  <line x1={hx-2} y1={cp.y(afHi)} x2={hx+2} y2={cp.y(afHi)} stroke={bandC} strokeWidth="1" opacity=".35"/>
+                  <line x1={hx-2} y1={cp.y(afLo)} x2={hx+2} y2={cp.y(afLo)} stroke={bandC} strokeWidth="1" opacity=".35"/></>}
+                <circle cx={hx} cy={cp.y(fc.dam)} r="2.5" fill="#94a3b8"/>
+                <circle cx={hx} cy={cp.y(af)} r="2.5" fill={bandC}/>
+                <circle cx={hx} cy={cp.y(fc.rtm)} r="2.5" fill="#22d3ee"/>
                 <text x={hx+4} y={PD.t+10} fill="#94a3b8" fontSize="7" fontFamily="inherit">DA ${fc.dam}</text>
-                <text x={hx+4} y={PD.t+20} fill="#f59e0b" fontSize="7" fontFamily="inherit">FC ${fc.fc.toFixed(0)}{bw>0.5?" \u00B1"+bw.toFixed(0):""}</text>
-                {bv!==null&&<text x={hx+4} y={PD.t+30} fill="#f97316" fontSize="7" fontFamily="inherit">LN ${bv.toFixed(0)}</text>}
-                <text x={hx+4} y={PD.t+(bv!==null?40:30)} fill="#22d3ee" fontSize="7" fontFamily="inherit">RT ${fc.rtm}</text>
+                <text x={hx+4} y={PD.t+20} fill={bandC} fontSize="7" fontFamily="inherit">{isLearned?"LN":"FC"} ${af.toFixed(0)}{bw>0.5?" \u00B1"+bw.toFixed(0):""}</text>
+                <text x={hx+4} y={PD.t+30} fill="#22d3ee" fontSize="7" fontFamily="inherit">RT ${fc.rtm}</text>
               </g>);})()}
               {/* Sim playhead */}
               {(running||ticks.length>0)&&selDay===DAYS[simD]&&(()=>{
@@ -1029,7 +1048,7 @@ export default function Dashboard(){
           <div style={P}>
             <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:3}}>
               <div style={{display:"flex",alignItems:"center",gap:6}}>
-                <div style={LB}>CHARGE / DISCHARGE SCHEDULE</div>
+                <div title="Weekly charge/discharge schedule grid. Click cells to cycle through Charge/Discharge/Hold. Drag to paint multiple cells. Sub-hourly execution: each hour is split into 4 quarter-hour slots internally. SOC column shows battery energy level after each hour." style={LB}>CHARGE / DISCHARGE SCHEDULE</div>
                 {clipN>0&&<div style={{fontSize:f(7),fontWeight:700,padding:"1px 5px",borderRadius:2,background:"#f59e0b15",border:"1px solid #f59e0b30",color:"#f59e0b"}}>{clipN} partial</div>}
               </div>
               <SchBtns/>
@@ -1050,33 +1069,103 @@ export default function Dashboard(){
 
         {/* ═══ RIGHT COLUMN: Configuration (collapsible) ═══ */}
         {(mob?mobPanel==="config":!colR)&&<div style={{width:mob?"100%":"220px",flexShrink:0,display:"flex",flexDirection:"column",gap:6}}>
-          {/* FORECAST ACCURACY */}
-          <div style={P}>
-            <div title="Controls how accurately the system forecasts real-time prices. Higher accuracy means smaller errors between forecast and actual RT price, leading to better schedule optimization." style={LB}>FORECAST ACCURACY</div>
-            {[{k:"sup",v:supAcc,set:setSupAcc,l:"Supply",c:"#3b82f6",tip:"How well the system predicts generation supply (wind, solar, thermal). Higher = less forecast error on the supply side."},{k:"dem",v:demAcc,set:setDemAcc,l:"Demand",c:"#22c55e",tip:"How well the system predicts electricity demand (load). Higher = less forecast error on the demand side."},{k:"crd",v:crdAcc,set:setCrdAcc,l:"Crowd",c:"#ef4444",tip:"How well the system predicts other BESS operators' behavior. Higher = better anticipation of crowding effects that compress RT margins."}].map(s=>(
-              <div key={s.k} style={{marginBottom:6}} title={s.tip}>
-                <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
-                  <span style={{fontSize:f(8),color:s.c,fontWeight:600}}>{s.l}</span>
-                  <span style={{fontSize:f(9),fontWeight:800,color:s.c}}>{s.v}%</span>
-                </div>
-                <input type="range" min={0} max={100} value={s.v} onChange={e=>{s.set(+e.target.value);setAccP(null);}} style={{width:"100%",height:4,appearance:"none",WebkitAppearance:"none",background:"#1a2744",borderRadius:2,outline:"none",cursor:"pointer",accentColor:s.c}}/>
-              </div>))}
-            <div style={{display:"flex",gap:2,flexWrap:"wrap",marginTop:2}}>
-              {Object.entries(ACC_PRESETS).map(([n,p])=>(
-                <button key={n} title={p.tip} onClick={()=>{setSupAcc(p.sup);setDemAcc(p.dem);setCrdAcc(p.crd);setAccP(n);}} style={{padding:"2px 5px",borderRadius:3,fontSize:f(7),fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:accP===n?"1px solid #60a5fa":"1px solid #1a2744",background:accP===n?"#3b82f610":"#0d1a2e",color:accP===n?"#60a5fa":"#4a6a8a"}}>{n}</button>))}
+          {/* FORECAST INTELLIGENCE (unified accuracy + sensitivity) */}
+          <div style={{...P,border:"1px solid #f59e0b25"}}>
+            <div onClick={()=>setFcOpen(!fcOpen)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",marginBottom:fcOpen?6:0}}>
+              <div style={{display:"flex",alignItems:"center",gap:4}}>
+                <span style={{fontSize:f(8),color:"#f59e0b",fontWeight:700,transition:"transform .15s",display:"inline-block",transform:fcOpen?"rotate(90deg)":"rotate(0deg)"}}>{"\u25B6"}</span>
+                <div title="Controls how your forecast blends DAM prices toward RTM prices. Accuracy sets how well you see each factor. Sensitivity sets how much each factor influences the blend. Together they determine the forecast the optimizer uses." style={{...LB,color:"#f59e0b",marginBottom:0}}>FORECAST INTELLIGENCE</div>
+              </div>
+              {!fcOpen&&<div style={{display:"flex",gap:4}}>
+                {[{l:"S",v:supAcc,c:"#3b82f6"},{l:"D",v:demAcc,c:"#22c55e"},{l:"C",v:crdAcc,c:"#ef4444"}].map(x=>(
+                  <span key={x.l} style={{fontSize:f(7),color:x.c,fontWeight:700}}>{x.l}:{x.v}%</span>
+                ))}
+              </div>}
             </div>
+            {fcOpen&&<div>
+              {/* Per-factor rows: each has accuracy + sensitivity side by side */}
+              {[
+                {k:"sup",acc:supAcc,setAcc:setSupAcc,w:supW,setW:setSupW,l:"Supply",c:"#3b82f6",
+                 accTip:"How well the system predicts generation supply (wind, solar, thermal output). Higher = smaller forecast error from supply-side uncertainty.",
+                 wTip:"How much supply factors influence the overall forecast. At 0x supply is invisible. At 3x supply dominates the DAM-to-RTM correction."},
+                {k:"dem",acc:demAcc,setAcc:setDemAcc,w:demW,setW:setDemW,l:"Demand",c:"#22c55e",
+                 accTip:"How well the system predicts electricity demand (load patterns, temperature response). Higher = less demand-driven forecast error.",
+                 wTip:"How much demand factors influence the forecast. Strongest during morning ramp (H04-H08) and midday when load drives prices."},
+                {k:"crd",acc:crdAcc,setAcc:setCrdAcc,w:crdW,setW:setCrdW,l:"Crowd",c:"#ef4444",
+                 accTip:"How well the system predicts other BESS operators' behavior. The most valuable signal: crowd compression at H16-H21 can collapse RT 40-70% below DAM.",
+                 wTip:"How much BESS fleet crowding influences the forecast. Highest impact during peak hours (H16-H21) where crowd share reaches 80-95%."}
+              ].map(s=>(
+                <div key={s.k} style={{marginBottom:8,paddingBottom:6,borderBottom:"1px solid #1a274440"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+                    <span title={s.accTip} style={{fontSize:f(9),color:s.c,fontWeight:700}}>{s.l}</span>
+                    <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                      <span title="Forecast accuracy for this factor" style={{fontSize:f(8),fontWeight:700,color:s.c}}>{s.acc}%</span>
+                      <span style={{fontSize:f(7),color:"#2a3a4a"}}>|</span>
+                      <span title="Sensitivity weight for this factor" style={{fontSize:f(8),fontWeight:700,color:s.w===0?"#2a3a4a":s.c}}>{s.w.toFixed(1)}x</span>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                    <div style={{flex:1}} title={s.accTip}>
+                      <div style={{fontSize:f(6),color:"#3a5a7a",marginBottom:1}}>Accuracy</div>
+                      <input type="range" min={0} max={100} value={s.acc} onChange={e=>{s.setAcc(+e.target.value);setAccP(null);}} style={{width:"100%",height:4,appearance:"none",WebkitAppearance:"none",background:"#1a2744",borderRadius:2,outline:"none",cursor:"pointer",accentColor:s.c}}/>
+                    </div>
+                    <div style={{flex:1}} title={s.wTip}>
+                      <div style={{fontSize:f(6),color:"#3a5a7a",marginBottom:1}}>Sensitivity</div>
+                      <input type="range" min={0} max={30} value={Math.round(s.w*10)} onChange={e=>{s.setW(+e.target.value/10);}} style={{width:"100%",height:4,appearance:"none",WebkitAppearance:"none",background:"#1a2744",borderRadius:2,outline:"none",cursor:"pointer",accentColor:s.c}}/>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {/* Effective share bar */}
+              {(()=>{
+                const ts=supW+demW+crdW;
+                if(ts<=0)return(<div style={{fontSize:f(7),color:"#2a3a4a",textAlign:"center",padding:4}}>All weights zero: forecast = DAM only</div>);
+                const es=supW/ts*100,ed=demW/ts*100,ec=crdW/ts*100;
+                return(<div title="Shows how the three factors are distributed after sensitivity weighting. The colored bar represents each factor's share of the total forecast correction from DAM toward RTM." style={{marginBottom:6}}>
+                  <div style={{fontSize:f(7),color:"#3a5a7a",marginBottom:2}}>Effective share mix:</div>
+                  <div style={{display:"flex",height:6,borderRadius:3,overflow:"hidden",border:"1px solid #1a2744"}}>
+                    {es>0.5&&<div style={{width:es+"%",background:"#3b82f680",transition:"width .2s"}}/>}
+                    {ed>0.5&&<div style={{width:ed+"%",background:"#22c55e80",transition:"width .2s"}}/>}
+                    {ec>0.5&&<div style={{width:ec+"%",background:"#ef444480",transition:"width .2s"}}/>}
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",marginTop:1,fontSize:f(6)}}>
+                    <span style={{color:"#3b82f6"}}>{es.toFixed(0)}% Sup</span>
+                    <span style={{color:"#22c55e"}}>{ed.toFixed(0)}% Dem</span>
+                    <span style={{color:"#ef4444"}}>{ec.toFixed(0)}% Crd</span>
+                  </div>
+                </div>);
+              })()}
+              {/* Presets */}
+              <div style={{display:"flex",gap:0,marginBottom:4}}>
+                <div style={{flex:1}}>
+                  <div title="Preset accuracy profiles. Naive = DAM only. Perfect = full RTM foresight." style={{fontSize:f(6),color:"#3a5a7a",marginBottom:2}}>Accuracy presets:</div>
+                  <div style={{display:"flex",gap:2,flexWrap:"wrap"}}>
+                    {Object.entries(ACC_PRESETS).map(([n,p])=>(
+                      <button key={n} title={p.tip} onClick={()=>{setSupAcc(p.sup);setDemAcc(p.dem);setCrdAcc(p.crd);setAccP(n);}} style={{padding:"2px 5px",borderRadius:3,fontSize:f(7),fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:accP===n?"1px solid #f59e0b":"1px solid #1a2744",background:accP===n?"#f59e0b10":"#0d1a2e",color:accP===n?"#f59e0b":"#4a6a8a"}}>{n}</button>))}
+                  </div>
+                </div>
+              </div>
+              <div>
+                <div title="Preset sensitivity profiles. Controls which factors dominate the forecast blend." style={{fontSize:f(6),color:"#3a5a7a",marginBottom:2}}>Sensitivity presets:</div>
+                <div style={{display:"flex",gap:2,flexWrap:"wrap"}}>
+                  {[{n:"Even",s:1,d:1,c:1,t:"Equal weight to all factors"},{n:"Crowd Focus",s:.5,d:.5,c:3,t:"3x weight on crowd behavior. Best for peak-hour analysis."},{n:"Supply Focus",s:3,d:.5,c:.5,t:"3x weight on supply. Best for morning ramp / renewable analysis."},{n:"No Crowd",s:1,d:1,c:0,t:"Zero crowd weight. Shows what happens without fleet intelligence."},{n:"Crowd Only",s:0,d:0,c:1,t:"Only crowd signal. Isolates the BESS fleet compression effect."}].map(p=>{
+                    const active=supW===p.s&&demW===p.d&&crdW===p.c;
+                    return(<button key={p.n} title={p.t} onClick={()=>{setSupW(p.s);setDemW(p.d);setCrdW(p.c);}} style={{padding:"2px 5px",borderRadius:3,fontSize:f(7),fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:active?"1px solid #f59e0b":"1px solid #1a2744",background:active?"#f59e0b10":"#0d1a2e",color:active?"#f59e0b":"#4a6a8a"}}>{p.n}</button>);
+                  })}
+                </div>
+              </div>
+            </div>}
           </div>
-          {/* MARKET VOLATILITY */}
           <div style={P}>
             <div title="Controls how much random noise the simulated RT price has around the true RTM value. At 0% the simulation is deterministic (RT = RTM exactly), showing theoretical alpha. At 100% the RT price has high variance around RTM, adding realistic execution slippage. Lower values make it easier to see the value of forecast intelligence. Higher values test robustness." style={LB}>MARKET VOLATILITY</div>
             <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
               <span style={{fontSize:f(8),color:"#f59e0b",fontWeight:600}}>{mktVol===0?"Deterministic":mktVol<=15?"Low":mktVol<=40?"Moderate":mktVol<=70?"High":"Extreme"}</span>
               <span style={{fontSize:f(9),fontWeight:800,color:"#f59e0b"}}>{mktVol}%</span>
             </div>
-            <input type="range" min={0} max={100} value={mktVol} onChange={e=>setMktVol(+e.target.value)} style={{width:"100%",height:4,appearance:"none",WebkitAppearance:"none",background:"#1a2744",borderRadius:2,outline:"none",cursor:"pointer",accentColor:"#f59e0b"}}/>
+            <input title={"Market volatility: "+mktVol+"%. Controls random noise magnitude around the true RT price during simulation."} type="range" min={0} max={100} value={mktVol} onChange={e=>setMktVol(+e.target.value)} style={{width:"100%",height:4,appearance:"none",WebkitAppearance:"none",background:"#1a2744",borderRadius:2,outline:"none",cursor:"pointer",accentColor:"#f59e0b"}}/>
             <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}>
-              {[{v:0,l:"0%"},{v:15,l:"15%"},{v:25,l:"25%"},{v:50,l:"50%"},{v:100,l:"100%"}].map(o=>(
-                <button key={o.v} onClick={()=>setMktVol(o.v)} style={{padding:"1px 4px",borderRadius:2,cursor:"pointer",fontFamily:"inherit",fontSize:f(7),fontWeight:600,border:mktVol===o.v?"1px solid #f59e0b":"1px solid #1a2744",background:mktVol===o.v?"#f59e0b15":"#0d1a2e",color:mktVol===o.v?"#f59e0b":"#4a6a8a"}}>{o.l}</button>
+              {[{v:0,l:"0%",t:"Deterministic: RT exactly equals RTM data. Shows pure forecast alpha."},{v:15,l:"15%",t:"Low noise: small random deviations around RTM."},{v:25,l:"25%",t:"Default: moderate noise simulating typical intra-hour RT variation."},{v:50,l:"50%",t:"High noise: large random swings. Tests robustness."},{v:100,l:"100%",t:"Extreme: maximum noise. Stress-tests the strategy."}].map(o=>(
+                <button key={o.v} title={o.t} onClick={()=>setMktVol(o.v)} style={{padding:"1px 4px",borderRadius:2,cursor:"pointer",fontFamily:"inherit",fontSize:f(7),fontWeight:600,border:mktVol===o.v?"1px solid #f59e0b":"1px solid #1a2744",background:mktVol===o.v?"#f59e0b15":"#0d1a2e",color:mktVol===o.v?"#f59e0b":"#4a6a8a"}}>{o.l}</button>
               ))}
             </div>
           </div>
@@ -1105,7 +1194,7 @@ export default function Dashboard(){
             {battOpen&&<div>
             <div style={{display:"flex",gap:3,flexWrap:"wrap",marginBottom:8}}>
               {Object.entries(BATT_PRESETS).map(([n,p])=>(
-                <button key={n} onClick={()=>applyBP(n,p)} style={{padding:"3px 6px",borderRadius:3,cursor:"pointer",fontFamily:"inherit",fontSize:f(7),fontWeight:600,border:battPreset===n?"1px solid #22d3ee":"1px solid #1a2744",background:battPreset===n?"#22d3ee10":"#0d1a2e",color:battPreset===n?"#22d3ee":"#5a7a9a"}}>{n}</button>))}
+                <button key={n} title={n+": "+p.mw+"MW / "+p.mwh+"MWh, Chg "+p.chgMW+" / Dis "+p.disMW+" MW/h, RTE "+p.rte+"%"} onClick={()=>applyBP(n,p)} style={{padding:"3px 6px",borderRadius:3,cursor:"pointer",fontFamily:"inherit",fontSize:f(7),fontWeight:600,border:battPreset===n?"1px solid #22d3ee":"1px solid #1a2744",background:battPreset===n?"#22d3ee10":"#0d1a2e",color:battPreset===n?"#22d3ee":"#5a7a9a"}}>{n}</button>))}
             </div>
             <div style={{fontSize:f(7),color:"#3a5a7a",fontWeight:700,letterSpacing:".06em",marginBottom:3}}>NAMEPLATE</div>
             <NumField label="Power" value={battMW} setValue={setBattMW} min={1} max={500} step={5} unit="MW" color="#22d3ee"/>
