@@ -379,7 +379,7 @@ export default function Dashboard(){
   const [colR,setColR]=useState(false);
   const [battOpen,setBattOpen]=useState(true);
   const [profitOpen,setProfitOpen]=useState(true);
-  const [fcOpen,setFcOpen]=useState(true);
+  const [fcOpen,setFcOpen]=useState(false);
   const [mobPanel,setMobPanel]=useState("center"); // mobile: "trade","center","config"
   const learnLastDay=useRef(-1);
   const learnSeenRef=useRef(new Set());
@@ -842,79 +842,84 @@ export default function Dashboard(){
           </div>
           {/* FORECAST INTELLIGENCE */}
           <div style={{...P,border:"1px solid #f59e0b25"}}>
-            <div onClick={()=>setFcOpen(!fcOpen)} style={{cursor:"pointer",marginBottom:fcOpen?4:0}}>
-              <div style={{display:"flex",alignItems:"center",gap:4}}>
+            <div onClick={()=>setFcOpen(!fcOpen)} style={{cursor:"pointer"}}>
+              <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:fcOpen?6:4}}>
                 <span style={{fontSize:f(8),color:"#f59e0b",fontWeight:700,transition:"transform .15s",display:"inline-block",transform:fcOpen?"rotate(90deg)":"rotate(0deg)"}}>{"\u25B6"}</span>
                 <div style={{...LB,color:"#f59e0b",marginBottom:0}}>FORECAST INTELLIGENCE</div>
               </div>
-              {!fcOpen&&<div style={{display:"flex",gap:6,marginTop:3,paddingLeft:16}}>
-                {[{l:"Supply",v:supAcc,c:"#3b82f6"},{l:"Demand",v:demAcc,c:"#22c55e"},{l:"Crowd",v:crdAcc,c:"#ef4444"}].map(x=>(
-                  <span key={x.l} style={{fontSize:f(7),color:x.c,fontWeight:600}}>{x.l} {x.v}%</span>
+              {!fcOpen&&<div style={{display:"flex",gap:3,paddingLeft:2}}>
+                {[{l:"S",v:supAcc,c:"#3b82f6",n:"Supply"},{l:"D",v:demAcc,c:"#22c55e",n:"Demand"},{l:"C",v:crdAcc,c:"#ef4444",n:"Crowd"}].map(x=>(
+                  <div key={x.l} style={{flex:1,padding:"3px 0",borderRadius:3,background:x.c+"10",border:"1px solid "+x.c+"25",textAlign:"center"}}>
+                    <div style={{fontSize:f(10),fontWeight:800,color:x.v>0?x.c:x.c+"50",lineHeight:1}}>{x.v}%</div>
+                    <div style={{fontSize:f(6),color:x.c+"90",fontWeight:600,marginTop:1}}>{x.n}</div>
+                  </div>
                 ))}
-                <span style={{fontSize:f(7),color:"#3a5a7a"}}>|</span>
-                <span style={{fontSize:f(7),color:"#f59e0b",fontWeight:600}}>Vol {mktVol}%</span>
+                <div style={{width:1,background:"#1a2744",margin:"2px 0"}}/>
+                <div style={{padding:"3px 6px",borderRadius:3,background:"#f59e0b08",border:"1px solid #f59e0b20",textAlign:"center",flexShrink:0}}>
+                  <div style={{fontSize:f(10),fontWeight:800,color:mktVol>0?"#f59e0b":"#f59e0b50",lineHeight:1}}>{mktVol}%</div>
+                  <div style={{fontSize:f(6),color:"#f59e0b90",fontWeight:600,marginTop:1}}>Vol</div>
+                </div>
               </div>}
             </div>
             {fcOpen&&<div>
-              {/* Factor rows: accuracy slider + compact sensitivity */}
               {[
                 {k:"sup",acc:supAcc,setAcc:setSupAcc,w:supW,setW:setSupW,l:"Supply",c:"#3b82f6"},
                 {k:"dem",acc:demAcc,setAcc:setDemAcc,w:demW,setW:setDemW,l:"Demand",c:"#22c55e"},
                 {k:"crd",acc:crdAcc,setAcc:setCrdAcc,w:crdW,setW:setCrdW,l:"Crowd",c:"#ef4444"}
               ].map(s=>(
-                <div key={s.k} style={{marginBottom:4}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:1}}>
-                    <span style={{fontSize:f(8),color:s.c,fontWeight:700}}>{s.l}</span>
-                    <div style={{display:"flex",gap:4,alignItems:"center"}}>
-                      <span style={{fontSize:f(8),fontWeight:800,color:s.c,width:28,textAlign:"right"}}>{s.acc}%</span>
-                      <div style={{display:"flex",gap:1,alignItems:"center"}}>
-                        {[0,0.5,1,2,3].map(v=>(
-                          <button key={v} onClick={()=>s.setW(v)} style={{padding:"0px 3px",borderRadius:2,cursor:"pointer",fontFamily:"inherit",fontSize:f(6),fontWeight:s.w===v?800:500,lineHeight:"12px",border:s.w===v?"1px solid "+s.c+"80":"1px solid #1a2744",background:s.w===v?s.c+"15":"transparent",color:s.w===v?s.c:"#3a5a7a"}}>{v}x</button>
-                        ))}
-                      </div>
+                <div key={s.k} style={{marginBottom:6}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
+                    <div style={{display:"flex",alignItems:"baseline",gap:4}}>
+                      <span style={{fontSize:f(8),color:s.c,fontWeight:700}}>{s.l}</span>
+                      <span style={{fontSize:f(10),fontWeight:800,color:s.acc>0?s.c:s.c+"40"}}>{s.acc}%</span>
+                    </div>
+                    <div style={{display:"flex",gap:1,alignItems:"center"}}>
+                      {[0,0.5,1,2,3].map(v=>(
+                        <button key={v} onClick={()=>s.setW(v)} style={{padding:"1px 3px",borderRadius:2,cursor:"pointer",fontFamily:"inherit",fontSize:f(6),fontWeight:700,lineHeight:"11px",border:s.w===v?"1px solid "+s.c:"1px solid #1a2744",background:s.w===v?s.c+"18":"transparent",color:s.w===v?s.c:"#3a5a7a"}}>{v}x</button>
+                      ))}
                     </div>
                   </div>
-                  <input type="range" min={0} max={100} value={s.acc} onChange={e=>{s.setAcc(+e.target.value);setAccP(null);}} style={{width:"100%",height:3,appearance:"none",WebkitAppearance:"none",background:"#1a2744",borderRadius:2,outline:"none",cursor:"pointer",accentColor:s.c}}/>
+                  <input type="range" min={0} max={100} value={s.acc} onChange={e=>{s.setAcc(+e.target.value);setAccP(null);}} style={{width:"100%",height:4,appearance:"none",WebkitAppearance:"none",background:"#1a2744",borderRadius:2,outline:"none",cursor:"pointer",accentColor:s.c}}/>
                 </div>
               ))}
-              {/* Effective share bar */}
+              {/* Share mix */}
               {(()=>{
                 const ts=supW+demW+crdW;
-                if(ts<=0)return(<div style={{fontSize:f(6),color:"#2a3a4a",textAlign:"center",padding:2}}>All weights zero: forecast = DAM</div>);
+                if(ts<=0)return(<div style={{fontSize:f(7),color:"#2a3a4a",textAlign:"center",padding:2}}>All weights zero: forecast = DAM</div>);
                 const es=supW/ts*100,ed=demW/ts*100,ec=crdW/ts*100;
-                return(<div style={{display:"flex",alignItems:"center",gap:4,marginBottom:4}}>
-                  <div style={{flex:1,display:"flex",height:4,borderRadius:2,overflow:"hidden",border:"1px solid #1a2744"}}>
-                    {es>0.5&&<div style={{width:es+"%",background:"#3b82f680",transition:"width .2s"}}/>}
-                    {ed>0.5&&<div style={{width:ed+"%",background:"#22c55e80",transition:"width .2s"}}/>}
-                    {ec>0.5&&<div style={{width:ec+"%",background:"#ef444480",transition:"width .2s"}}/>}
+                return(<div style={{display:"flex",alignItems:"center",gap:4,marginBottom:6}}>
+                  <div style={{flex:1,display:"flex",height:4,borderRadius:2,overflow:"hidden"}}>
+                    {es>0.5&&<div style={{width:es+"%",background:"#3b82f6",transition:"width .2s"}}/>}
+                    {ed>0.5&&<div style={{width:ed+"%",background:"#22c55e",transition:"width .2s"}}/>}
+                    {ec>0.5&&<div style={{width:ec+"%",background:"#ef4444",transition:"width .2s"}}/>}
                   </div>
                   <div style={{display:"flex",gap:3,fontSize:f(6),flexShrink:0}}>
-                    <span style={{color:"#3b82f6"}}>{es.toFixed(0)}</span>
-                    <span style={{color:"#22c55e"}}>{ed.toFixed(0)}</span>
-                    <span style={{color:"#ef4444"}}>{ec.toFixed(0)}</span>
+                    <span style={{color:"#3b82f6",fontWeight:600}}>{es.toFixed(0)}</span>
+                    <span style={{color:"#22c55e",fontWeight:600}}>{ed.toFixed(0)}</span>
+                    <span style={{color:"#ef4444",fontWeight:600}}>{ec.toFixed(0)}</span>
                   </div>
                 </div>);
               })()}
-              {/* Presets: single row */}
-              <div style={{display:"flex",gap:2,flexWrap:"wrap",marginBottom:4}}>
+              {/* Presets */}
+              <div style={{display:"flex",gap:2,flexWrap:"wrap",marginBottom:6}}>
                 {Object.entries(ACC_PRESETS).map(([n,p])=>(
-                  <button key={n} title={p.tip} onClick={()=>{setSupAcc(p.sup);setDemAcc(p.dem);setCrdAcc(p.crd);setAccP(n);}} style={{padding:"1px 5px",borderRadius:3,fontSize:f(7),fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:accP===n?"1px solid #f59e0b":"1px solid #1a2744",background:accP===n?"#f59e0b10":"#0d1a2e",color:accP===n?"#f59e0b":"#4a6a8a"}}>{n}</button>))}
-                <div style={{width:1,height:14,background:"#1a274480"}}/>
+                  <button key={n} title={p.tip} onClick={()=>{setSupAcc(p.sup);setDemAcc(p.dem);setCrdAcc(p.crd);setAccP(n);}} style={{padding:"2px 6px",borderRadius:3,fontSize:f(7),fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:accP===n?"1px solid #f59e0b":"1px solid #1a2744",background:accP===n?"#f59e0b15":"#0d1a2e",color:accP===n?"#f59e0b":"#4a6a8a"}}>{n}</button>))}
+                <div style={{width:1,height:16,background:"#1a2744"}}/>
                 {[{n:"Even",s:1,d:1,c:1},{n:"Crowd\u2191",s:.5,d:.5,c:3},{n:"No Crd",s:1,d:1,c:0}].map(p=>{
                   const active=supW===p.s&&demW===p.d&&crdW===p.c;
-                  return(<button key={p.n} onClick={()=>{setSupW(p.s);setDemW(p.d);setCrdW(p.c);}} style={{padding:"1px 5px",borderRadius:3,fontSize:f(7),fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:active?"1px solid #a855f7":"1px solid #1a2744",background:active?"#a855f710":"#0d1a2e",color:active?"#a855f7":"#4a6a8a"}}>{p.n}</button>);
+                  return(<button key={p.n} onClick={()=>{setSupW(p.s);setDemW(p.d);setCrdW(p.c);}} style={{padding:"2px 6px",borderRadius:3,fontSize:f(7),fontWeight:600,cursor:"pointer",fontFamily:"inherit",border:active?"1px solid #a855f7":"1px solid #1a2744",background:active?"#a855f715":"#0d1a2e",color:active?"#a855f7":"#4a6a8a"}}>{p.n}</button>);
                 })}
               </div>
-              {/* Market Volatility (folded in) */}
-              <div style={{borderTop:"1px solid #1a2744",paddingTop:4}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2}}>
+              {/* Volatility */}
+              <div style={{borderTop:"1px solid #1a2744",paddingTop:6}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:2}}>
                   <span style={{fontSize:f(7),color:"#f59e0b",fontWeight:700,letterSpacing:".06em"}}>VOLATILITY</span>
-                  <span style={{fontSize:f(8),fontWeight:800,color:"#f59e0b"}}>{mktVol}%</span>
+                  <span style={{fontSize:f(9),fontWeight:800,color:"#f59e0b"}}>{mktVol}%</span>
                 </div>
-                <input type="range" min={0} max={100} value={mktVol} onChange={e=>setMktVol(+e.target.value)} style={{width:"100%",height:3,appearance:"none",WebkitAppearance:"none",background:"#1a2744",borderRadius:2,outline:"none",cursor:"pointer",accentColor:"#f59e0b"}}/>
-                <div style={{display:"flex",justifyContent:"space-between",marginTop:1}}>
+                <input type="range" min={0} max={100} value={mktVol} onChange={e=>setMktVol(+e.target.value)} style={{width:"100%",height:4,appearance:"none",WebkitAppearance:"none",background:"#1a2744",borderRadius:2,outline:"none",cursor:"pointer",accentColor:"#f59e0b"}}/>
+                <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}>
                   {[{v:0,l:"0%"},{v:15,l:"15%"},{v:25,l:"25%"},{v:50,l:"50%"},{v:100,l:"100%"}].map(o=>(
-                    <button key={o.v} onClick={()=>setMktVol(o.v)} style={{padding:"0px 3px",borderRadius:2,cursor:"pointer",fontFamily:"inherit",fontSize:f(6),fontWeight:600,border:mktVol===o.v?"1px solid #f59e0b":"1px solid transparent",background:mktVol===o.v?"#f59e0b15":"transparent",color:mktVol===o.v?"#f59e0b":"#3a5a7a"}}>{o.l}</button>
+                    <button key={o.v} onClick={()=>setMktVol(o.v)} style={{padding:"1px 4px",borderRadius:2,cursor:"pointer",fontFamily:"inherit",fontSize:f(7),fontWeight:600,border:mktVol===o.v?"1px solid #f59e0b":"1px solid #1a2744",background:mktVol===o.v?"#f59e0b15":"transparent",color:mktVol===o.v?"#f59e0b":"#3a5a7a"}}>{o.l}</button>
                   ))}
                 </div>
               </div>
