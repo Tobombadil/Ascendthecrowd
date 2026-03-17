@@ -171,7 +171,7 @@ function interpPrices(hourlyPrices,slotsPerHour){
 
 // ── Sub-hourly DP optimizer (works for any number of hours) ──
 function runDP(prices,b,s0){
-  const{mwh,chgMW,disMW,rte,minSoc,maxSoc,floorMar=FLOOR_MAR,ceilMar=CEIL_MAR,termVal=0}=b;
+  const{mwh,chgMW,disMW,rte,minSoc,maxSoc,floorMar=FLOOR_MAR,ceilMar=CEIL_MAR,termVal=0,maxCycles=0}=b;
   const eMin=minSoc+floorMar,eMax=maxSoc-ceilMar;
   const nH=prices.length;
   const cP=(chgMW*rte/mwh)*100/SPH,dP=(disMW/mwh)*100/SPH;
@@ -180,8 +180,6 @@ function runDP(prices,b,s0){
   const STEP=1,N=Math.max(1,Math.round((eMax-eMin)/STEP)+1);
   const si=s=>Math.min(N-1,Math.max(0,Math.round((s-eMin)/STEP)));
   const sv=i=>eMin+i*STEP;
-  const dp=Array.from({length:nSlots+1},()=>new Float64Array(N));
-  const act=Array.from({length:nSlots},()=>new Uint8Array(N));
   const avgP=prices.reduce((a,b)=>a+b,0)/nH;
   // Auto-compute terminal value from price spread
   let tv=termVal;
@@ -193,25 +191,46 @@ function runDP(prices,b,s0){
     const spread=Math.max(0,dearAvg-cheapAvg/rte);
     tv=avgP>0?spread*0.25/avgP:0;
   }
-  for(let i=0;i<N;i++){dp[nSlots][i]=avgP*((sv(i)-eMin)/100)*mwh*tv;}
+  // If cycle limit active, add discharge-budget dimension
+  const useBudget=maxCycles>0;
+  const BSTEP=5;
+  const maxBudget=useBudget?maxCycles*(eMax-eMin):0;
+  const NB=useBudget?Math.max(1,Math.round(maxBudget/BSTEP)+1):1;
+  const bi=b2=>Math.min(NB-1,Math.max(0,Math.round(b2/BSTEP)));
+  const bv=i=>i*BSTEP;
+  const NS=N*NB; // total states per slot
+  const idx=(si2,bi2)=>si2*NB+bi2;
+  const dp=Array.from({length:nSlots+1},()=>new Float64Array(NS));
+  const act=Array.from({length:nSlots},()=>new Uint8Array(NS));
+  // Terminal value
+  for(let i=0;i<N;i++){const tvVal=avgP*((sv(i)-eMin)/100)*mwh*tv;for(let j=0;j<NB;j++)dp[nSlots][idx(i,j)]=tvVal;}
+  // Backward pass
   for(let t=nSlots-1;t>=0;t--){const p=subPrices[t];
     for(let i=0;i<N;i++){const s=sv(i);
-      let bv=dp[t+1][i],ba=0;
-      const ca=Math.min(cP,eMax-s);
-      if(ca>0.5){const v=-p*((ca/100)*mwh/rte)+dp[t+1][si(s+ca)];if(v>bv){bv=v;ba=1;}}
-      const da=Math.min(dP,s-eMin);
-      if(da>0.5){const v=p*((da/100)*mwh)+dp[t+1][si(s-da)];if(v>bv){bv=v;ba=2;}}
-      dp[t][i]=bv;act[t][i]=ba;
+      for(let j=0;j<NB;j++){
+        let bv2=dp[t+1][idx(i,j)],ba=0;
+        // Charge
+        const ca=Math.min(cP,eMax-s);
+        if(ca>0.5){const v=-p*((ca/100)*mwh/rte)+dp[t+1][idx(si(s+ca),j)];if(v>bv2){bv2=v;ba=1;}}
+        // Discharge (check budget)
+        const da=Math.min(dP,s-eMin);
+        if(da>0.5){
+          const budgetOk=!useBudget||bv(j)>=da;
+          if(budgetOk){const nj=useBudget?bi(bv(j)-da):0;const v=p*((da/100)*mwh)+dp[t+1][idx(si(s-da),nj)];if(v>bv2){bv2=v;ba=2;}}
+        }
+        dp[t][idx(i,j)]=bv2;act[t][idx(i,j)]=ba;
+      }
     }
   }
   // Forward pass
   const M=["H","C","D"],subSch=Array(nSlots).fill("H");
   let s=Math.max(eMin,Math.min(eMax,s0));
+  let bj=useBudget?NB-1:0; // start with full budget
   for(let t=0;t<nSlots;t++){
-    const a=act[t][si(s)];
+    const a=act[t][idx(si(s),bj)];
     subSch[t]=M[a];
     if(a===1)s=Math.min(eMax,s+Math.min(cP,eMax-s));
-    else if(a===2)s=Math.max(eMin,s-Math.min(dP,s-eMin));
+    else if(a===2){const da=Math.min(dP,s-eMin);s=Math.max(eMin,s-da);if(useBudget)bj=bi(bv(bj)-da);}
   }
   return{subSch,endSoc:s};
 }
@@ -317,7 +336,8 @@ export default function Dashboard(){
   const [rlRebuildCad,setRlRebuildCad]=useState(4);
   const [rlOpen,setRlOpen]=useState(false);
 
-  const batt=useMemo(()=>({mw:battMW,mwh:battMWh,chgMW,disMW,rte:rte/100,minSoc,maxSoc,floorMar:3,ceilMar:2,termVal:0}),[battMW,battMWh,chgMW,disMW,rte,minSoc,maxSoc]);
+  const [maxCycles,setMaxCycles]=useState(0); // 0=unlimited
+  const batt=useMemo(()=>({mw:battMW,mwh:battMWh,chgMW,disMW,rte:rte/100,minSoc,maxSoc,floorMar:3,ceilMar:2,termVal:0,maxCycles}),[battMW,battMWh,chgMW,disMW,rte,minSoc,maxSoc,maxCycles]);
   const duration=battMWh/battMW;
   const chgPctHr=(chgMW*(rte/100)/battMWh)*100;
   const disPctHr=(disMW/battMWh)*100;
@@ -370,6 +390,7 @@ export default function Dashboard(){
   const [rec,setRec]=useState(null);
   const [manual,setManual]=useState(null);
   const prevRT=useRef(null);const tickRef=useRef(null);
+  const dayDisRef=useRef(0); // discharge %SOC used today (for cycle limit)
   const [rtLearn,setRtLearn]=useState(false);
   const rtOptLastH=useRef(-1);
   // RT Learning: simple hourly prices per day + cross-day hourly averages
@@ -377,8 +398,8 @@ export default function Dashboard(){
   const crossDayRef=useRef({}); // {hour: {sum, n}} cross-day hourly RT averages
   const [colL,setColL]=useState(false);
   const [colR,setColR]=useState(false);
-  const [battOpen,setBattOpen]=useState(true);
-  const [profitOpen,setProfitOpen]=useState(true);
+  const [battOpen,setBattOpen]=useState(false);
+  const [profitOpen,setProfitOpen]=useState(false);
   const [fcOpen,setFcOpen]=useState(false);
   const [mobPanel,setMobPanel]=useState("center"); // mobile: "trade","center","config"
   const learnLastDay=useRef(-1);
@@ -391,7 +412,7 @@ export default function Dashboard(){
   const reset=useCallback(()=>{
     setRunning(false);setTicks([]);setSimD(0);setSimH(0);setSimM(0);
     setSoc(startSoc);socRef.current=startSoc;setUPnl(0);setSPnl(0);setSSoc(startSoc);sSocRef.current=startSoc;
-    setAlerts([]);setTlog([]);setRec(null);setManual(null);prevRT.current=null;setRtLearn(false);rtOptLastH.current=-1;learnedRef.current={};crossDayRef.current={};learnLastDay.current=-1;learnSeenRef.current=new Set();lastRebuildTime.current=-999;
+    setAlerts([]);setTlog([]);setRec(null);setManual(null);prevRT.current=null;setRtLearn(false);rtOptLastH.current=-1;learnedRef.current={};crossDayRef.current={};learnLastDay.current=-1;learnSeenRef.current=new Set();lastRebuildTime.current=-999;dayDisRef.current=0;
   },[startSoc]);
 
   // ── RT Learning ──────────────────────────────────────────────
@@ -576,7 +597,7 @@ export default function Dashboard(){
     const rD=rte/100,tph=12,cpt=(chgMW*rD/battMWh)*100/tph,dpt=(disMW/battMWh)*100/tph;
     tickRef.current=setInterval(()=>{
       setSimM(prev=>{let nm=prev+5,ha=false;if(nm>=60){nm=0;ha=true;}
-        if(ha)setSimH(ph=>{let nh=ph+1;if(nh>=24){nh=0;setSimD(pd=>(pd+1)%7);}return nh;});
+        if(ha)setSimH(ph=>{let nh=ph+1;if(nh>=24){nh=0;setSimD(pd=>(pd+1)%7);dayDisRef.current=0;}return nh;});
         setSimD(cd=>{setSimH(ch=>{
           const hr=ch,dn=DAYS[cd],row=WEEK[dn].d[hr],[,dam,rtm,sS,dS,cS]=row;
           // Sub-hourly price interpolation: cosine blend between current and next hour
@@ -615,10 +636,16 @@ export default function Dashboard(){
             em=manual||r.mode;
           }
           setRec(r);
+          // Cycle limit enforcement
+          const eRange=maxSoc-2-(minSoc+3);
+          const cycBudget=maxCycles>0?maxCycles*eRange:Infinity;
+          if(em==="DISCHARGE"&&maxCycles>0&&dayDisRef.current>=cycBudget){
+            em="HOLD";setRec({mode:"HOLD",conf:95,reason:"Cycle limit ("+maxCycles+"/day). "+dayDisRef.current.toFixed(0)+"% discharged.",tag:"CYCLE",tc:"#a855f7",ovr:true});
+          }
           // Execute using live SOC ref with effective bounds matching DP
           const eMinRT=minSoc+3,eMaxRT=maxSoc-2;
           let pD=0,sD=0;
-          if(em==="DISCHARGE"&&liveSoc>eMinRT){const a=Math.min(dpt,liveSoc-eMinRT);if(a>0.01){pD=rt*(a/100)*battMWh;sD=-a;}}
+          if(em==="DISCHARGE"&&liveSoc>eMinRT){const a=Math.min(dpt,liveSoc-eMinRT);if(a>0.01){pD=rt*(a/100)*battMWh;sD=-a;dayDisRef.current+=a;}}
           else if(em==="CHARGE"&&liveSoc<eMaxRT){const a=Math.min(cpt,eMaxRT-liveSoc);if(a>0.01){pD=-(rt*(a/100)*battMWh/rD);sD=a;}}
           const newSoc=Math.max(eMinRT,Math.min(eMaxRT,liveSoc+sD));
           socRef.current=newSoc; // update ref synchronously
@@ -1196,6 +1223,12 @@ export default function Dashboard(){
             <NumField label="Max SOC" value={maxSoc} setValue={setMaxSoc} min={minSoc+1} max={100} step={1} unit="%" color="#22c55e"/>
             <NumField label="Start SOC" value={startSoc} setValue={setStartSoc} min={minSoc} max={maxSoc} step={1} unit="%" color="#94a3b8"/>
             <div style={{height:1,background:"#1a274480",margin:"6px 0"}}/>
+            <div style={{fontSize:f(7),color:"#3a5a7a",fontWeight:700,letterSpacing:".06em",marginBottom:3}}>DAILY CYCLES</div>
+            <div style={{display:"flex",gap:2,marginBottom:6}}>
+              {[{v:0,l:"\u221E"},{v:1,l:"1"},{v:2,l:"2"},{v:3,l:"3"},{v:4,l:"4"}].map(o=>(
+                <button key={o.v} onClick={()=>setMaxCycles(o.v)} style={{flex:1,padding:"3px 0",borderRadius:3,cursor:"pointer",fontFamily:"inherit",textAlign:"center",fontSize:f(9),fontWeight:700,border:maxCycles===o.v?"1.5px solid #a855f7":"1px solid #1a2744",background:maxCycles===o.v?"#a855f715":"#0d1a2e",color:maxCycles===o.v?"#a855f7":"#4a6a8a"}}>{o.l}</button>
+              ))}
+            </div>
             <div style={{padding:"4px 6px",background:"#0d1a2e",borderRadius:3,border:"1px solid #1a2744"}}>
               <DR l="Duration" v={duration.toFixed(1)+" hr"} c="#22d3ee"/>
               <DR l="Usable Energy" v={usableMWh.toFixed(0)+" MWh"} c="#f59e0b"/>
@@ -1203,6 +1236,7 @@ export default function Dashboard(){
               <div style={{height:1,background:"#1a274430",margin:"2px 0"}}/>
               <DR l={"Chg "+chgPctHr.toFixed(1)+"%/hr"} v={fullChgHr.toFixed(1)+" hr full"} c="#22c55e"/>
               <DR l={"Dis "+disPctHr.toFixed(1)+"%/hr"} v={fullDisHr.toFixed(1)+" hr empty"} c="#ef4444"/>
+              <DR l="Cycle Limit" v={maxCycles>0?maxCycles+"/day":"\u221E"} c="#a855f7"/>
             </div>
             </div>}
           </div>
